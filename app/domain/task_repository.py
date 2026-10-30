@@ -1,0 +1,16 @@
+from typing import Protocol
+from uuid import UUID
+
+from app.domain.task import Task
+
+
+class TaskRepository(Protocol):
+    async def add(self, task: Task) -> None: ...
+
+    async def list_by_project(self, project_id: UUID) -> list[Task]: ...
+
+    async def get(self, task_id: UUID) -> Task | None: ...
+
+    async def save(self, task: Task) -> None: ...
+
+    async def delete(self, task_id: UUID) -> bool: ...
