@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.dependencies import TaskServiceDep
 from app.api.v1.task_schemas import TaskCreate, TaskRead, TaskUpdate
+from app.application.task_service import ProjectNotFoundError
 from app.domain.task import Task
 
 projects_router = APIRouter(prefix="/projects", tags=["tasks"])
@@ -16,18 +17,26 @@ tasks_router = APIRouter(prefix="/tasks", tags=["tasks"])
 async def create_task(
     project_id: UUID, payload: TaskCreate, service: TaskServiceDep
 ) -> Task:
-    return await service.create(
-        project_id=project_id,
-        title=payload.title,
-        description=payload.description,
-        status=payload.status,
-        priority=payload.priority,
-    )
+    try:
+        return await service.create(
+            project_id=project_id,
+            title=payload.title,
+            description=payload.description,
+            status=payload.status,
+            priority=payload.priority,
+        )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found") from exc
 
 
 @projects_router.get("/{project_id}/tasks", response_model=list[TaskRead])
-async def list_tasks(project_id: UUID, service: TaskServiceDep) -> list[Task]:
-    return await service.list_by_project(project_id)
+async def list_tasks(
+    project_id: UUID,
+    service: TaskServiceDep,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[Task]:
+    return await service.list_by_project(project_id, page=page, limit=limit)
 
 
 @tasks_router.get("/{task_id}", response_model=TaskRead)

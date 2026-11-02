@@ -1,13 +1,23 @@
 from uuid import uuid4
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.dependencies import get_task_repository
+from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
 from app.main import create_app
+
+
+def create_test_app() -> FastAPI:
+    app = create_app()
+    repository = InMemoryTaskRepository()
+    app.dependency_overrides[get_task_repository] = lambda: repository
+    return app
 
 
 def test_task_crud_flow() -> None:
     project_id = uuid4()
-    app = create_app()
+    app = create_test_app()
 
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "ok"}
@@ -47,7 +57,7 @@ def test_task_crud_flow() -> None:
 def test_validation_project_scope_and_lifespan() -> None:
     project_id = uuid4()
     other_project_id = uuid4()
-    app = create_app()
+    app = create_test_app()
 
     with TestClient(app) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
@@ -62,4 +72,18 @@ def test_validation_project_scope_and_lifespan() -> None:
         assert client.get(f"/api/v1/tasks/{task_id}").json()["title"] == "Task"
 
     with TestClient(app) as client:
-        assert client.get(f"/api/v1/tasks/{task_id}").status_code == 404
+        assert client.get(f"/api/v1/tasks/{task_id}").status_code == 200
+
+
+def test_task_pagination() -> None:
+    project_id = uuid4()
+    with TestClient(create_test_app()) as client:
+        endpoint = f"/api/v1/projects/{project_id}/tasks"
+        for index in range(3):
+            assert client.post(endpoint, json={"title": f"Task {index}"}).status_code == 201
+
+        first_page = client.get(endpoint, params={"page": 1, "limit": 2})
+        second_page = client.get(endpoint, params={"page": 2, "limit": 2})
+        assert [item["title"] for item in first_page.json()] == ["Task 0", "Task 1"]
+        assert [item["title"] for item in second_page.json()] == ["Task 2"]
+        assert client.get(endpoint, params={"page": 0}).status_code == 422

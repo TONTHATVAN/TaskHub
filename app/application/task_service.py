@@ -14,6 +14,10 @@ class TaskChanges(TypedDict, total=False):
     priority: TaskPriority
 
 
+class ProjectNotFoundError(Exception):
+    pass
+
+
 class TaskService:
     def __init__(self, repository: TaskRepository) -> None:
         self._repository = repository
@@ -26,6 +30,8 @@ class TaskService:
         status: TaskStatus,
         priority: TaskPriority,
     ) -> Task:
+        if not await self._repository.project_exists(project_id):
+            raise ProjectNotFoundError
         task = Task(
             id=uuid4(),
             project_id=project_id,
@@ -38,8 +44,10 @@ class TaskService:
         await self._repository.add(task)
         return task
 
-    async def list_by_project(self, project_id: UUID) -> list[Task]:
-        return await self._repository.list_by_project(project_id)
+    async def list_by_project(
+        self, project_id: UUID, *, page: int = 1, limit: int = 20
+    ) -> list[Task]:
+        return await self._repository.list_by_project(project_id, page=page, limit=limit)
 
     async def get(self, task_id: UUID) -> Task | None:
         return await self._repository.get(task_id)
