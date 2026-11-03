@@ -17,7 +17,7 @@ docker compose up -d db redis
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Nếu tạo `.env` từ file mẫu, hãy thay `POSTGRES_PASSWORD` và mật khẩu tương ứng trong `DATABASE_URL` trước khi khởi động DB.
+Nếu tạo `.env` từ file mẫu, hãy thay `POSTGRES_PASSWORD`, mật khẩu tương ứng trong `DATABASE_URL` và `JWT_SECRET_KEY` bằng một chuỗi ngẫu nhiên tối thiểu 32 ký tự trước khi khởi động ứng dụng.
 
 PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang được sử dụng. Redis dùng `localhost:6379`. Kiểm tra bằng `docker compose ps`; dừng dịch vụ bằng `docker compose down`.
 
@@ -30,12 +30,12 @@ Mã ứng dụng nằm trong `app/`:
 ```text
 app/
 ├── api/              Router, request/response schemas, dependencies
-├── application/      TaskService và các thao tác nghiệp vụ
-├── domain/           Task, enum và giao diện repository
+├── application/      Nghiệp vụ Task và xác thực
+├── domain/           Entity, enum và giao diện repository
 ├── infrastructure/   SQLAlchemy models, session và repositories
-└── main.py           App factory
+└── main.py           App factory và lifespan
 migrations/           Alembic migration
-tests/                Kiểm tra API và cấu trúc database
+tests/                Kiểm tra API, migration và database
 ```
 
 Khởi động API từ thư mục project:
@@ -64,7 +64,7 @@ Mở `http://127.0.0.1:8000/docs` để thử API. Endpoint kiểm tra ứng d�
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. Các API tạo user, workspace và project sẽ được triển khai cùng xác thực và phân quyền ở các buổi tiếp theo; hiện tại cần tạo các bản ghi này trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
+Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. API tạo workspace và project sẽ được triển khai cùng phân quyền ở các buổi tiếp theo; hiện tại cần tạo các bản ghi này trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
 
 `BaseRepository[T]` cung cấp thêm, lấy, liệt kê có phân trang, cập nhật và xóa model. `SqlTaskRepository` chuyển giữa model SQLAlchemy và entity Task trong domain. Mỗi request sử dụng một `AsyncSession`; giao dịch được commit khi xử lý thành công và rollback nếu có lỗi.
 
@@ -79,7 +79,7 @@ Kiểm tra mã:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests migrations
-.\.venv\Scripts\mypy.exe app
+.\.venv\Scripts\mypy.exe app tests migrations
 ```
 
 Khi PostgreSQL đã chạy và migration đã được áp dụng, chạy bài kiểm tra tích hợp:
@@ -92,8 +92,23 @@ Remove-Item Env:TASKHUB_RUN_DB_TESTS
 
 Bài kiểm tra tạo dữ liệu riêng và dọn dữ liệu đó khi kết thúc.
 
-## Buổi 3 — Phần đầu: đăng ký tài khoản
+## Buổi 3 — Xác thực
 
 `POST /api/v1/auth/register` nhận `email`, `full_name` và `password`. Email được chuẩn hóa về chữ thường; mật khẩu được băm bằng bcrypt trước khi lưu và không xuất hiện trong response. Endpoint trả 409 khi email đã tồn tại, 422 khi dữ liệu không hợp lệ. Mật khẩu cần ít nhất 8 ký tự và tối đa 72 byte UTF-8.
 
-Phần đăng nhập, JWT access/refresh token và đăng xuất sẽ được triển khai ở các phần tiếp theo của Buổi 3.
+Các endpoint còn lại:
+
+| Phương thức | Đường dẫn | Mục đích |
+|---|---|---|
+| POST | `/api/v1/auth/login` | Nhận email và password, trả access token và refresh token |
+| POST | `/api/v1/auth/refresh` | Đổi refresh token còn hiệu lực lấy cặp token mới |
+| POST | `/api/v1/auth/logout` | Thu hồi refresh token |
+| GET | `/api/v1/users/me` | Lấy hồ sơ bằng `Authorization: Bearer <access_token>` |
+
+Access token có hiệu lực mặc định 15 phút; refresh token có hiệu lực 7 ngày. Mỗi refresh token chỉ dùng được một lần. Logout thu hồi refresh token, còn access token đã phát hành vẫn có hiệu lực đến khi hết hạn. Trạng thái thu hồi được lưu trong bảng `refresh_tokens`.
+
+Sau khi cập nhật mã, chạy migration mới:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```

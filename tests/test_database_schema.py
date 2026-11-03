@@ -27,6 +27,7 @@ def test_schema_creates_all_tables_and_foreign_keys() -> None:
         "labels",
         "task_labels",
         "comments",
+        "refresh_tokens",
     }
     assert {key["referred_table"] for key in inspector.get_foreign_keys("tasks")} == {
         "projects",
@@ -35,6 +36,9 @@ def test_schema_creates_all_tables_and_foreign_keys() -> None:
     assert {key["referred_table"] for key in inspector.get_foreign_keys("task_labels")} == {
         "tasks",
         "labels",
+    }
+    assert {key["referred_table"] for key in inspector.get_foreign_keys("refresh_tokens")} == {
+        "users"
     }
     engine.dispose()
 

@@ -57,6 +57,21 @@ class UserModel(Base):
         back_populates="creator", foreign_keys="TaskModel.created_by"
     )
     comments: Mapped[list["CommentModel"]] = relationship(back_populates="author")
+    refresh_tokens: Mapped[list["RefreshTokenModel"]] = relationship(
+        back_populates="user", passive_deletes=True
+    )
+
+
+class RefreshTokenModel(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[UserModel] = relationship(back_populates="refresh_tokens")
 
 
 class WorkspaceModel(Base):
