@@ -91,3 +91,9 @@ Remove-Item Env:TASKHUB_RUN_DB_TESTS
 ```
 
 Bài kiểm tra tạo dữ liệu riêng và dọn dữ liệu đó khi kết thúc.
+
+## Buổi 3 — Phần đầu: đăng ký tài khoản
+
+`POST /api/v1/auth/register` nhận `email`, `full_name` và `password`. Email được chuẩn hóa về chữ thường; mật khẩu được băm bằng bcrypt trước khi lưu và không xuất hiện trong response. Endpoint trả 409 khi email đã tồn tại, 422 khi dữ liệu không hợp lệ. Mật khẩu cần ít nhất 8 ký tự và tối đa 72 byte UTF-8.
+
+Phần đăng nhập, JWT access/refresh token và đăng xuất sẽ được triển khai ở các phần tiếp theo của Buổi 3.

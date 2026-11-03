@@ -16,15 +16,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.domain.task import TaskPriority, TaskStatus
+from app.domain.user import UserRole
 
 
 class Base(DeclarativeBase):
     pass
-
-
-class UserRole(StrEnum):
-    ADMIN = "ADMIN"
-    MEMBER = "MEMBER"
 
 
 class WorkspaceRole(StrEnum):
