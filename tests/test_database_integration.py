@@ -41,20 +41,34 @@ async def _exercise_auth() -> None:
         ) as client:
             registered = await client.post(
                 "/api/v1/auth/register",
-                json={"email": email, "full_name": "Auth Test", "password": "secret-pass-123"},
+                json={
+                    "email": email,
+                    "full_name": "Auth Test",
+                    "password": "secret-pass-123",
+                },
             )
             assert registered.status_code == 201
             user_id = UUID(registered.json()["id"])
-            assert (await client.post(
-                "/api/v1/auth/register",
-                json={"email": email, "full_name": "Auth Test", "password": "secret-pass-123"},
-            )).status_code == 409
-            assert (await client.post(
-                "/api/v1/auth/login", json={"email": email, "password": "wrong-pass"}
-            )).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": email,
+                        "full_name": "Auth Test",
+                        "password": "secret-pass-123",
+                    },
+                )
+            ).status_code == 409
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": email, "password": "wrong-pass"},
+                )
+            ).status_code == 401
 
             login = await client.post(
-                "/api/v1/auth/login", json={"email": email, "password": "secret-pass-123"}
+                "/api/v1/auth/login",
+                json={"email": email, "password": "secret-pass-123"},
             )
             assert login.status_code == 200
             pair = login.json()
@@ -73,17 +87,24 @@ async def _exercise_auth() -> None:
                 "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
             )
             assert refreshed.status_code == 200
-            assert (await client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
-            )).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/refresh",
+                    json={"refresh_token": pair["refresh_token"]},
+                )
+            ).status_code == 401
 
             new_refresh_token = refreshed.json()["refresh_token"]
-            assert (await client.post(
-                "/api/v1/auth/logout", json={"refresh_token": new_refresh_token}
-            )).status_code == 204
-            assert (await client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": new_refresh_token}
-            )).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/logout", json={"refresh_token": new_refresh_token}
+                )
+            ).status_code == 204
+            assert (
+                await client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": new_refresh_token}
+                )
+            ).status_code == 401
 
         async with session_factory() as session:
             tokens = await session.scalars(
@@ -113,7 +134,9 @@ async def _exercise_database() -> None:
                 hashed_password="disabled",
             )
             workspace = WorkspaceModel(id=workspace_id, name="Integration", owner=user)
-            project = ProjectModel(id=project_id, name="Integration", workspace=workspace)
+            project = ProjectModel(
+                id=project_id, name="Integration", workspace=workspace
+            )
             await BaseRepository(session, UserModel).add(user)
             session.add(project)
             await session.commit()
@@ -171,7 +194,9 @@ async def _exercise_database() -> None:
             assert updated_user.full_name == "Updated User"
     finally:
         async with session_factory() as session:
-            await session.execute(delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id))
+            await session.execute(
+                delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id)
+            )
             await BaseRepository(session, UserModel).delete(user_id)
             await session.commit()
         await engine.dispose()

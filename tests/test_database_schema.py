@@ -33,13 +33,15 @@ def test_schema_creates_all_tables_and_foreign_keys() -> None:
         "projects",
         "users",
     }
-    assert {key["referred_table"] for key in inspector.get_foreign_keys("task_labels")} == {
+    assert {
+        key["referred_table"] for key in inspector.get_foreign_keys("task_labels")
+    } == {
         "tasks",
         "labels",
     }
-    assert {key["referred_table"] for key in inspector.get_foreign_keys("refresh_tokens")} == {
-        "users"
-    }
+    assert {
+        key["referred_table"] for key in inspector.get_foreign_keys("refresh_tokens")
+    } == {"users"}
     engine.dispose()
 
 
@@ -48,9 +50,13 @@ def test_model_relationships() -> None:
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
-        user = UserModel(email="owner@example.com", full_name="Owner", hashed_password="test")
+        user = UserModel(
+            email="owner@example.com", full_name="Owner", hashed_password="test"
+        )
         workspace = WorkspaceModel(name="Workspace", owner=user)
-        workspace.members.append(WorkspaceMemberModel(user=user, role=WorkspaceRole.OWNER))
+        workspace.members.append(
+            WorkspaceMemberModel(user=user, role=WorkspaceRole.OWNER)
+        )
         project = ProjectModel(name="Project", workspace=workspace)
         task = TaskModel(title="Task", project=project)
         label = LabelModel(name="Backend", color="#123456", project=project)

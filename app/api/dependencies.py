@@ -65,7 +65,9 @@ def get_token_service() -> JwtTokenService:
 
 def get_session_service(
     users: Annotated[UserRepository, Depends(get_user_repository)],
-    refresh_tokens: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    refresh_tokens: Annotated[
+        RefreshTokenRepository, Depends(get_refresh_token_repository)
+    ],
     tokens: Annotated[JwtTokenService, Depends(get_token_service)],
 ) -> SessionService:
     return SessionService(users, refresh_tokens, tokens)

@@ -24,7 +24,11 @@ class SessionService:
 
     async def login(self, email: str, password: str) -> TokenPair:
         user = await self._users.get_by_email(email)
-        if user is None or not user.is_active or not await verify_password(password, user.hashed_password):
+        if (
+            user is None
+            or not user.is_active
+            or not await verify_password(password, user.hashed_password)
+        ):
             raise InvalidCredentialsError
         return await self._issue_pair(user.id)
 
@@ -35,7 +39,9 @@ class SessionService:
         user = await self._users.get_by_id(claims.user_id)
         if user is None or not user.is_active:
             raise InvalidTokenError
-        if not await self._refresh_tokens.consume(claims.token_id, user.id, datetime.now(UTC)):
+        if not await self._refresh_tokens.consume(
+            claims.token_id, user.id, datetime.now(UTC)
+        ):
             raise InvalidTokenError
         return await self._issue_pair(user.id)
 

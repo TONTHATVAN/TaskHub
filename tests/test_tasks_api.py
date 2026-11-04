@@ -62,13 +62,24 @@ def test_validation_project_scope_and_lifespan() -> None:
     with TestClient(app) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
         assert client.post(endpoint, json={"title": "   "}).status_code == 422
-        assert client.post("/api/v1/projects/not-a-uuid/tasks", json={"title": "Task"}).status_code == 422
+        assert (
+            client.post(
+                "/api/v1/projects/not-a-uuid/tasks", json={"title": "Task"}
+            ).status_code
+            == 422
+        )
 
         created = client.post(endpoint, json={"title": "Task"})
         task_id = created.json()["id"]
         assert client.get(f"/api/v1/projects/{other_project_id}/tasks").json() == []
-        assert client.patch(f"/api/v1/tasks/{task_id}", json={"status": None}).status_code == 422
-        assert client.patch(f"/api/v1/tasks/{task_id}", json={"title": "  "}).status_code == 422
+        assert (
+            client.patch(f"/api/v1/tasks/{task_id}", json={"status": None}).status_code
+            == 422
+        )
+        assert (
+            client.patch(f"/api/v1/tasks/{task_id}", json={"title": "  "}).status_code
+            == 422
+        )
         assert client.get(f"/api/v1/tasks/{task_id}").json()["title"] == "Task"
 
     with TestClient(app) as client:
@@ -80,7 +91,10 @@ def test_task_pagination() -> None:
     with TestClient(create_test_app()) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
         for index in range(3):
-            assert client.post(endpoint, json={"title": f"Task {index}"}).status_code == 201
+            assert (
+                client.post(endpoint, json={"title": f"Task {index}"}).status_code
+                == 201
+            )
 
         first_page = client.get(endpoint, params={"page": 1, "limit": 2})
         second_page = client.get(endpoint, params={"page": 2, "limit": 2})

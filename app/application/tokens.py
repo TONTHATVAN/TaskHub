@@ -31,7 +31,9 @@ class JwtTokenService:
 
     def issue_access(self, user_id: UUID) -> str:
         now = datetime.now(UTC)
-        return self._encode(user_id, "access", now, now + timedelta(minutes=self._access_minutes))
+        return self._encode(
+            user_id, "access", now, now + timedelta(minutes=self._access_minutes)
+        )
 
     def issue_refresh(self, user_id: UUID) -> tuple[str, UUID, datetime]:
         now = datetime.now(UTC)

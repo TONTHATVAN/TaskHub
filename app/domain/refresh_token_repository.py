@@ -4,6 +4,8 @@ from uuid import UUID
 
 
 class RefreshTokenRepository(Protocol):
-    async def add(self, token_id: UUID, user_id: UUID, expires_at: datetime) -> None: ...
+    async def add(
+        self, token_id: UUID, user_id: UUID, expires_at: datetime
+    ) -> None: ...
 
     async def consume(self, token_id: UUID, user_id: UUID, now: datetime) -> bool: ...

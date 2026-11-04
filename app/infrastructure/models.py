@@ -37,19 +37,29 @@ class ProjectStatus(StrEnum):
 class UserModel(Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(200))
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, native_enum=False, create_constraint=True, validate_strings=True),
+        Enum(
+            UserRole, native_enum=False, create_constraint=True, validate_strings=True
+        ),
         default=UserRole.MEMBER,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    owned_workspaces: Mapped[list["WorkspaceModel"]] = relationship(back_populates="owner")
-    memberships: Mapped[list["WorkspaceMemberModel"]] = relationship(back_populates="user")
+    owned_workspaces: Mapped[list["WorkspaceModel"]] = relationship(
+        back_populates="owner"
+    )
+    memberships: Mapped[list["WorkspaceMemberModel"]] = relationship(
+        back_populates="user"
+    )
     assigned_tasks: Mapped[list["TaskModel"]] = relationship(
         back_populates="assignee", foreign_keys="TaskModel.assignee_id"
     )
@@ -66,10 +76,14 @@ class RefreshTokenModel(Base):
     __tablename__ = "refresh_tokens"
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     user: Mapped[UserModel] = relationship(back_populates="refresh_tokens")
 
@@ -77,10 +91,16 @@ class RefreshTokenModel(Base):
 class WorkspaceModel(Base):
     __tablename__ = "workspaces"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
     name: Mapped[str] = mapped_column(String(200))
-    owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     owner: Mapped[UserModel] = relationship(back_populates="owned_workspaces")
     members: Mapped[list["WorkspaceMemberModel"]] = relationship(
@@ -97,9 +117,16 @@ class WorkspaceMemberModel(Base):
     workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
     )
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     role: Mapped[WorkspaceRole] = mapped_column(
-        Enum(WorkspaceRole, native_enum=False, create_constraint=True, validate_strings=True)
+        Enum(
+            WorkspaceRole,
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        )
     )
 
     workspace: Mapped[WorkspaceModel] = relationship(back_populates="members")
@@ -109,42 +136,74 @@ class WorkspaceMemberModel(Base):
 class ProjectModel(Base):
     __tablename__ = "projects"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ProjectStatus] = mapped_column(
-        Enum(ProjectStatus, native_enum=False, create_constraint=True, validate_strings=True),
+        Enum(
+            ProjectStatus,
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
         default=ProjectStatus.ACTIVE,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     workspace: Mapped[WorkspaceModel] = relationship(back_populates="projects")
-    tasks: Mapped[list["TaskModel"]] = relationship(back_populates="project", passive_deletes=True)
-    labels: Mapped[list["LabelModel"]] = relationship(back_populates="project", passive_deletes=True)
+    tasks: Mapped[list["TaskModel"]] = relationship(
+        back_populates="project", passive_deletes=True
+    )
+    labels: Mapped[list["LabelModel"]] = relationship(
+        back_populates="project", passive_deletes=True
+    )
 
 
 class TaskModel(Base):
     __tablename__ = "tasks"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    assignee_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    assignee_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus, native_enum=False, create_constraint=True, validate_strings=True),
+        Enum(
+            TaskStatus, native_enum=False, create_constraint=True, validate_strings=True
+        ),
         default=TaskStatus.TODO,
         index=True,
     )
     priority: Mapped[TaskPriority] = mapped_column(
-        Enum(TaskPriority, native_enum=False, create_constraint=True, validate_strings=True),
+        Enum(
+            TaskPriority,
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
         default=TaskPriority.MEDIUM,
         index=True,
     )
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     project: Mapped[ProjectModel] = relationship(back_populates="tasks")
     assignee: Mapped[UserModel | None] = relationship(
@@ -156,15 +215,24 @@ class TaskModel(Base):
     labels: Mapped[list["LabelModel"]] = relationship(
         secondary="task_labels", back_populates="tasks", passive_deletes=True
     )
-    comments: Mapped[list["CommentModel"]] = relationship(back_populates="task", passive_deletes=True)
+    comments: Mapped[list["CommentModel"]] = relationship(
+        back_populates="task", passive_deletes=True
+    )
 
 
 class LabelModel(Base):
     __tablename__ = "labels"
-    __table_args__ = (UniqueConstraint("project_id", "name"), UniqueConstraint("id", "project_id"))
+    __table_args__ = (
+        UniqueConstraint("project_id", "name"),
+        UniqueConstraint("id", "project_id"),
+    )
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(100))
     color: Mapped[str] = mapped_column(String(7))
 
@@ -177,18 +245,30 @@ class LabelModel(Base):
 class TaskLabelModel(Base):
     __tablename__ = "task_labels"
 
-    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
-    label_id: Mapped[UUID] = mapped_column(ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True)
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    label_id: Mapped[UUID] = mapped_column(
+        ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class CommentModel(Base):
     __tablename__ = "comments"
 
-    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
-    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
-    author_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     task: Mapped[TaskModel] = relationship(back_populates="comments")
     author: Mapped[UserModel] = relationship(back_populates="comments")
