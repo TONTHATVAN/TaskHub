@@ -47,7 +47,9 @@ class TaskService:
     async def list_by_project(
         self, project_id: UUID, *, page: int = 1, limit: int = 20
     ) -> list[Task]:
-        return await self._repository.list_by_project(project_id, page=page, limit=limit)
+        return await self._repository.list_by_project(
+            project_id, page=page, limit=limit
+        )
 
     async def get(self, task_id: UUID) -> Task | None:
         return await self._repository.get(task_id)
