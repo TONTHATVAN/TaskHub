@@ -173,6 +173,14 @@ async def _exercise_database() -> None:
             assert updated.status_code == 200
             assert updated.json()["status"] == "IN_PROGRESS"
 
+            rejected = await client.patch(
+                f"/api/v1/tasks/{task_id}", json={"title": None}
+            )
+            assert rejected.status_code == 422
+            fetched_after_rejection = await client.get(f"/api/v1/tasks/{task_id}")
+            assert fetched_after_rejection.status_code == 200
+            assert fetched_after_rejection.json()["title"] == "Persisted task"
+
             deleted = await client.delete(f"/api/v1/tasks/{task_id}")
             assert deleted.status_code == 204
             assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404

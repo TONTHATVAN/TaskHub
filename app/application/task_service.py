@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import TypedDict
 from uuid import UUID, uuid4
 
+from app.domain.exceptions import ProjectNotFoundError, TaskNotFoundError
 from app.domain.task import Task, TaskPriority, TaskStatus
 from app.domain.task_repository import TaskRepository
 
@@ -12,10 +13,6 @@ class TaskChanges(TypedDict, total=False):
     description: str | None
     status: TaskStatus
     priority: TaskPriority
-
-
-class ProjectNotFoundError(Exception):
-    pass
 
 
 class TaskService:
@@ -51,17 +48,18 @@ class TaskService:
             project_id, page=page, limit=limit
         )
 
-    async def get(self, task_id: UUID) -> Task | None:
-        return await self._repository.get(task_id)
-
-    async def update(self, task_id: UUID, changes: TaskChanges) -> Task | None:
+    async def get(self, task_id: UUID) -> Task:
         task = await self._repository.get(task_id)
         if task is None:
-            return None
+            raise TaskNotFoundError
+        return task
 
+    async def update(self, task_id: UUID, changes: TaskChanges) -> Task:
+        task = await self.get(task_id)
         updated_task = replace(task, **changes)
         await self._repository.save(updated_task)
         return updated_task
 
-    async def delete(self, task_id: UUID) -> bool:
-        return await self._repository.delete(task_id)
+    async def delete(self, task_id: UUID) -> None:
+        if not await self._repository.delete(task_id):
+            raise TaskNotFoundError
