@@ -1,27 +1,31 @@
 from datetime import datetime
-from typing import cast
+from typing import Annotated, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.api.v1.task_constants import TASK_TITLE_MAX_LENGTH, TASK_TITLE_MIN_LENGTH
 from app.application.task_service import TaskChanges
 from app.domain.task import TaskPriority, TaskStatus
 
+TaskTitle = Annotated[
+    str, Field(min_length=TASK_TITLE_MIN_LENGTH, max_length=TASK_TITLE_MAX_LENGTH)
+]
 
-class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+
+class TaskPayload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class TaskCreate(TaskPayload):
+    title: TaskTitle
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
 
-    @field_validator("title", mode="before")
-    @classmethod
-    def strip_title(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
 
-
-class TaskUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=200)
+class TaskUpdate(TaskPayload):
+    title: TaskTitle | None = None
     description: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
@@ -31,7 +35,7 @@ class TaskUpdate(BaseModel):
     def reject_null_required_fields(cls, value: object) -> object:
         if value is None:
             raise ValueError("This field cannot be null")
-        return value.strip() if isinstance(value, str) else value
+        return value
 
     def to_changes(self) -> TaskChanges:
         return cast(TaskChanges, self.model_dump(exclude_unset=True))

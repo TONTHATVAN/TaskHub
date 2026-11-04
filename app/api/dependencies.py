@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.auth_constants import INVALID_ACCESS_TOKEN_MESSAGE
 from app.application.auth_service import AuthService
 from app.application.session_service import SessionService
 from app.application.task_service import TaskService
@@ -85,7 +86,7 @@ async def get_current_user(
 ) -> User:
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or missing access token",
+        detail=INVALID_ACCESS_TOKEN_MESSAGE,
         headers={"WWW-Authenticate": "Bearer"},
     )
     if credentials is None:

@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -62,6 +62,8 @@ def test_validation_project_scope_and_lifespan() -> None:
     with TestClient(app) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
         assert client.post(endpoint, json={"title": "   "}).status_code == 422
+        assert client.post(endpoint, json={"title": None}).status_code == 422
+        assert client.post(endpoint, json={"title": "x" * 201}).status_code == 422
         assert (
             client.post(
                 "/api/v1/projects/not-a-uuid/tasks", json={"title": "Task"}
@@ -77,10 +79,21 @@ def test_validation_project_scope_and_lifespan() -> None:
             == 422
         )
         assert (
+            client.patch(f"/api/v1/tasks/{task_id}", json={"title": None}).status_code
+            == 422
+        )
+        assert (
+            client.patch(
+                f"/api/v1/tasks/{task_id}", json={"priority": None}
+            ).status_code
+            == 422
+        )
+        assert (
             client.patch(f"/api/v1/tasks/{task_id}", json={"title": "  "}).status_code
             == 422
         )
         assert client.get(f"/api/v1/tasks/{task_id}").json()["title"] == "Task"
+        assert client.get(endpoint).json()[0]["title"] == "Task"
 
     with TestClient(app) as client:
         assert client.get(f"/api/v1/tasks/{task_id}").status_code == 200
@@ -101,3 +114,29 @@ def test_task_pagination() -> None:
         assert [item["title"] for item in first_page.json()] == ["Task 0", "Task 1"]
         assert [item["title"] for item in second_page.json()] == ["Task 2"]
         assert client.get(endpoint, params={"page": 0}).status_code == 422
+
+
+def test_not_found_responses() -> None:
+    app = create_test_app()
+    missing_task_id = uuid4()
+
+    with TestClient(app) as client:
+        for response in (
+            client.get(f"/api/v1/tasks/{missing_task_id}"),
+            client.patch(f"/api/v1/tasks/{missing_task_id}", json={"title": "Task"}),
+            client.delete(f"/api/v1/tasks/{missing_task_id}"),
+        ):
+            assert response.status_code == 404
+            assert response.json() == {"detail": "Task not found"}
+
+    class MissingProjectRepository(InMemoryTaskRepository):
+        async def project_exists(self, project_id: UUID) -> bool:
+            return False
+
+    app.dependency_overrides[get_task_repository] = MissingProjectRepository
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/projects/{uuid4()}/tasks", json={"title": "Task"}
+        )
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Project not found"}
