@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.exceptions import TaskNotFoundError
 from app.domain.task import Task
 from app.infrastructure.models import ProjectModel, TaskModel
 from app.infrastructure.repositories.base import BaseRepository
@@ -59,7 +60,7 @@ class SqlTaskRepository:
     async def save(self, task: Task) -> None:
         model = await self._repository.get(task.id)
         if model is None:
-            raise ValueError("Task not found")
+            raise TaskNotFoundError
         model.title = task.title
         model.description = task.description
         model.status = task.status
