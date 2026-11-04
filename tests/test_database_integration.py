@@ -1,13 +1,18 @@
 import asyncio
 import os
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.infrastructure.database import engine, session_factory
-from app.infrastructure.models import ProjectModel, UserModel, WorkspaceModel
+from app.infrastructure.models import (
+    ProjectModel,
+    RefreshTokenModel,
+    UserModel,
+    WorkspaceModel,
+)
 from app.infrastructure.repositories.base import BaseRepository
 from app.main import create_app
 
@@ -18,6 +23,101 @@ from app.main import create_app
 )
 def test_postgres_task_crud_and_persistence() -> None:
     asyncio.run(_exercise_database())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_auth_token_rotation() -> None:
+    asyncio.run(_exercise_auth())
+
+
+async def _exercise_auth() -> None:
+    email = f"auth-{uuid4()}@example.com"
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            registered = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": email,
+                    "full_name": "Auth Test",
+                    "password": "secret-pass-123",
+                },
+            )
+            assert registered.status_code == 201
+            user_id = UUID(registered.json()["id"])
+            assert (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": email,
+                        "full_name": "Auth Test",
+                        "password": "secret-pass-123",
+                    },
+                )
+            ).status_code == 409
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": email, "password": "wrong-pass"},
+                )
+            ).status_code == 401
+
+            login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": email, "password": "secret-pass-123"},
+            )
+            assert login.status_code == 200
+            pair = login.json()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            me = await client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {pair['access_token']}"},
+            )
+            assert me.status_code == 200
+            assert me.json()["email"] == email
+
+            refreshed = await client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
+            )
+            assert refreshed.status_code == 200
+            assert (
+                await client.post(
+                    "/api/v1/auth/refresh",
+                    json={"refresh_token": pair["refresh_token"]},
+                )
+            ).status_code == 401
+
+            new_refresh_token = refreshed.json()["refresh_token"]
+            assert (
+                await client.post(
+                    "/api/v1/auth/logout", json={"refresh_token": new_refresh_token}
+                )
+            ).status_code == 204
+            assert (
+                await client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": new_refresh_token}
+                )
+            ).status_code == 401
+
+        async with session_factory() as session:
+            tokens = await session.scalars(
+                select(RefreshTokenModel).where(RefreshTokenModel.user_id == user_id)
+            )
+            stored_tokens = list(tokens)
+            assert len(stored_tokens) == 2
+            assert all(token.revoked_at is not None for token in stored_tokens)
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.email == email))
+            await session.commit()
+        await engine.dispose()
 
 
 async def _exercise_database() -> None:
@@ -34,7 +134,9 @@ async def _exercise_database() -> None:
                 hashed_password="disabled",
             )
             workspace = WorkspaceModel(id=workspace_id, name="Integration", owner=user)
-            project = ProjectModel(id=project_id, name="Integration", workspace=workspace)
+            project = ProjectModel(
+                id=project_id, name="Integration", workspace=workspace
+            )
             await BaseRepository(session, UserModel).add(user)
             session.add(project)
             await session.commit()
@@ -92,7 +194,9 @@ async def _exercise_database() -> None:
             assert updated_user.full_name == "Updated User"
     finally:
         async with session_factory() as session:
-            await session.execute(delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id))
+            await session.execute(
+                delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id)
+            )
             await BaseRepository(session, UserModel).delete(user_id)
             await session.commit()
         await engine.dispose()

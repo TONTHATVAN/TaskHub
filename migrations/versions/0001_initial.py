@@ -178,11 +178,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table('task_labels')
-    op.drop_table('comments')
-    op.drop_table('tasks')
-    op.drop_table('labels')
-    op.drop_table('workspace_members')
-    op.drop_table('projects')
-    op.drop_table('workspaces')
-    op.drop_table('users')
+    op.drop_table("task_labels")
+    op.drop_table("comments")
+    op.drop_table("tasks")
+    op.drop_table("labels")
+    op.drop_table("workspace_members")
+    op.drop_table("projects")
+    op.drop_table("workspaces")
+    op.drop_table("users")
