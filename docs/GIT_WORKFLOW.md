@@ -43,11 +43,18 @@ docs: ghi quy trình Git và chuẩn định dạng
 test: bổ sung kiểm thử đăng nhập
 ```
 
-Kiểm tra `git status` và `git diff` trước khi commit. Sau đó đẩy **nhánh làm việc** lên GitHub:
+Kiểm tra `git status` và `git diff` trước khi commit:
 
 ```powershell
 git add <các-file-liên-quan>
 git commit -m "docs: ghi quy trình Git và chuẩn định dạng"
+```
+
+**Bắt buộc kiểm tra format lại ngay trước mỗi lần push** (kể cả sau khi sửa commit hoặc giải quyết conflict). Chỉ đẩy nhánh lên GitHub khi lệnh kiểm tra đạt; nếu chưa đạt, chạy `ruff format`, xem lại diff rồi commit phần sửa định dạng trước khi kiểm tra lại:
+
+```powershell
+.\.venv\Scripts\ruff.exe format --check app tests migrations
+if ($LASTEXITCODE -ne 0) { throw "Format chưa đạt; không push." }
 git push -u origin docs/git-workflow
 ```
 
