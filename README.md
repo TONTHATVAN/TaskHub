@@ -23,6 +23,8 @@ PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang đư
 
 Yêu cầu thực tập được tổng hợp trong [`docs/TASKHUB_CONG_VIEC.md`](docs/TASKHUB_CONG_VIEC.md).
 
+Quy trình nhánh, Pull Request và định dạng mã nguồn: [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md).
+
 ## Buổi 1 — Core Setup & Architecture
 
 Mã ứng dụng nằm trong `app/`:
