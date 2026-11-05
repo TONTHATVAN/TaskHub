@@ -1,17 +1,35 @@
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.dependencies import TaskServiceDep
-from app.api.v1.task_schemas import TaskCreate, TaskRead, TaskUpdate
+from app.api.v1.task_schemas import ErrorRead, TaskCreate, TaskRead, TaskUpdate
+from app.core.constants import (
+    LIMIT_DEFAULT,
+    LIMIT_MAX,
+    LIMIT_MIN,
+    PAGE_DEFAULT,
+    PAGE_MIN,
+)
+from app.core.messages import PROJECT_NOT_FOUND_MESSAGE, TASK_NOT_FOUND_MESSAGE
 from app.domain.task import Task
 
 projects_router = APIRouter(prefix="/projects", tags=["tasks"])
 tasks_router = APIRouter(prefix="/tasks", tags=["tasks"])
+TASK_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorRead, "description": TASK_NOT_FOUND_MESSAGE}
+}
+PROJECT_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorRead, "description": PROJECT_NOT_FOUND_MESSAGE}
+}
 
 
 @projects_router.post(
-    "/{project_id}/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED
+    "/{project_id}/tasks",
+    response_model=TaskRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=PROJECT_NOT_FOUND_RESPONSES,
 )
 async def create_task(
     project_id: UUID, payload: TaskCreate, service: TaskServiceDep
@@ -29,25 +47,33 @@ async def create_task(
 async def list_tasks(
     project_id: UUID,
     service: TaskServiceDep,
-    page: int = Query(default=1, ge=1),
-    limit: int = Query(default=20, ge=1, le=100),
+    page: Annotated[int, Query(ge=PAGE_MIN)] = PAGE_DEFAULT,
+    limit: Annotated[int, Query(ge=LIMIT_MIN, le=LIMIT_MAX)] = LIMIT_DEFAULT,
 ) -> list[Task]:
     return await service.list_by_project(project_id, page=page, limit=limit)
 
 
-@tasks_router.get("/{task_id}", response_model=TaskRead)
+@tasks_router.get(
+    "/{task_id}", response_model=TaskRead, responses=TASK_NOT_FOUND_RESPONSES
+)
 async def get_task(task_id: UUID, service: TaskServiceDep) -> Task:
     return await service.get(task_id)
 
 
-@tasks_router.patch("/{task_id}", response_model=TaskRead)
+@tasks_router.patch(
+    "/{task_id}", response_model=TaskRead, responses=TASK_NOT_FOUND_RESPONSES
+)
 async def update_task(
     task_id: UUID, payload: TaskUpdate, service: TaskServiceDep
 ) -> Task:
     return await service.update(task_id, payload.to_changes())
 
 
-@tasks_router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@tasks_router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=TASK_NOT_FOUND_RESPONSES,
+)
 async def delete_task(task_id: UUID, service: TaskServiceDep) -> Response:
     await service.delete(task_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

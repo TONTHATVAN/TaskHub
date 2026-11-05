@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import String, create_engine, inspect
 from sqlalchemy.orm import Session
 
 from app.infrastructure.models import (
@@ -42,6 +42,9 @@ def test_schema_creates_all_tables_and_foreign_keys() -> None:
     assert {
         key["referred_table"] for key in inspector.get_foreign_keys("refresh_tokens")
     } == {"users"}
+    title_type = TaskModel.__table__.c.title.type
+    assert isinstance(title_type, String)
+    assert title_type.length == 200
     engine.dispose()
 
 

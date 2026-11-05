@@ -15,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.core.constants import TASK_TITLE_MAX_LENGTH
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.user import UserRole
 
@@ -178,7 +179,7 @@ class TaskModel(Base):
     assignee_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
-    title: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(TASK_TITLE_MAX_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TaskStatus] = mapped_column(
         Enum(
