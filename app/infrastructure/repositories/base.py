@@ -1,7 +1,7 @@
 from typing import Generic, TypeVar
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.models import Base
@@ -36,6 +36,14 @@ class BaseRepository(Generic[ModelT]):
         return list(result), total or 0
 
     async def save(self, entity: ModelT) -> ModelT:
+        primary_key = tuple(
+            getattr(entity, column.name) for column in inspect(self.model).primary_key
+        )
+        if any(value is None for value in primary_key):
+            raise ValueError("Entity primary key is required")
+        entity_id = primary_key[0] if len(primary_key) == 1 else primary_key
+        if await self.get(entity_id) is None:
+            raise LookupError(f"{self.model.__name__} not found")
         entity = await self.session.merge(entity)
         await self.session.flush()
         return entity

@@ -6,14 +6,18 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
+from app.domain.exceptions import TaskNotFoundError
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
     ProjectModel,
     RefreshTokenModel,
     UserModel,
+    WorkspaceMemberModel,
     WorkspaceModel,
+    WorkspaceRole,
 )
 from app.infrastructure.repositories.base import BaseRepository
+from app.infrastructure.repositories.task import SqlTaskRepository
 from app.main import create_app
 
 
@@ -134,6 +138,9 @@ async def _exercise_database() -> None:
                 hashed_password="disabled",
             )
             workspace = WorkspaceModel(id=workspace_id, name="Integration", owner=user)
+            workspace.members.append(
+                WorkspaceMemberModel(user=user, role=WorkspaceRole.OWNER)
+            )
             project = ProjectModel(
                 id=project_id, name="Integration", workspace=workspace
             )
@@ -155,10 +162,23 @@ async def _exercise_database() -> None:
             assert created.status_code == 201
             task_id = created.json()["id"]
 
+            second = await client.post(
+                f"/api/v1/projects/{project_id}/tasks", json={"title": "Second task"}
+            )
+            assert second.status_code == 201
+
             listed = await client.get(
                 f"/api/v1/projects/{project_id}/tasks", params={"page": 1, "limit": 1}
             )
             assert [task["id"] for task in listed.json()] == [task_id]
+            next_page = await client.get(
+                f"/api/v1/projects/{project_id}/tasks", params={"page": 2, "limit": 1}
+            )
+            assert [task["id"] for task in next_page.json()] == [second.json()["id"]]
+
+        async with session_factory() as session:
+            stale_task = await SqlTaskRepository(session).get(UUID(task_id))
+            assert stale_task is not None
 
         async with AsyncClient(
             transport=ASGITransport(app=create_app()), base_url="http://test"
@@ -186,6 +206,12 @@ async def _exercise_database() -> None:
             assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404
 
         async with session_factory() as session:
+            tasks = SqlTaskRepository(session)
+            with pytest.raises(TaskNotFoundError):
+                await tasks.save(stale_task)
+            assert await tasks.delete(UUID(task_id)) is False
+
+        async with session_factory() as session:
             users = BaseRepository(session, UserModel)
             _, total = await users.list(page=1, limit=20)
             assert total >= 1
@@ -193,6 +219,29 @@ async def _exercise_database() -> None:
             assert stored_user is not None
             stored_user.full_name = "Updated User"
             await users.save(stored_user)
+            with pytest.raises(LookupError):
+                await users.save(
+                    UserModel(
+                        id=uuid4(),
+                        email=f"missing-{uuid4()}@example.invalid",
+                        full_name="Missing",
+                        hashed_password="disabled",
+                    )
+                )
+
+            memberships = BaseRepository(session, WorkspaceMemberModel)
+            member = await memberships.get((workspace_id, user_id))
+            assert member is not None
+            member.role = WorkspaceRole.EDITOR
+            await memberships.save(member)
+            with pytest.raises(LookupError):
+                await memberships.save(
+                    WorkspaceMemberModel(
+                        workspace_id=workspace_id,
+                        user_id=uuid4(),
+                        role=WorkspaceRole.VIEWER,
+                    )
+                )
             await session.commit()
 
         async with session_factory() as session:
@@ -200,6 +249,11 @@ async def _exercise_database() -> None:
             updated_user = await users.get(user_id)
             assert updated_user is not None
             assert updated_user.full_name == "Updated User"
+            updated_member = await BaseRepository(session, WorkspaceMemberModel).get(
+                (workspace_id, user_id)
+            )
+            assert updated_member is not None
+            assert updated_member.role == WorkspaceRole.EDITOR
     finally:
         async with session_factory() as session:
             await session.execute(
