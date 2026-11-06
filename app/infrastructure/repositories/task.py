@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import TaskNotFoundError
 from app.domain.task import Task
+from app.domain.task_repository import TaskChanges
 from app.infrastructure.models import ProjectModel, TaskModel
 from app.infrastructure.repositories.base import BaseRepository
 
@@ -58,20 +59,18 @@ class SqlTaskRepository:
         )
         return [self._to_domain(model) for model in result]
 
-    async def save(self, task: Task) -> None:
+    async def save(self, task: Task, changes: TaskChanges) -> Task:
         result = await self._session.execute(
             update(TaskModel)
             .where(TaskModel.id == task.id)
-            .values(
-                title=task.title,
-                description=task.description,
-                status=task.status,
-                priority=task.priority,
-            )
-            .returning(TaskModel.id)
+            .values(**changes)
+            .returning(TaskModel)
+            .execution_options(populate_existing=True)
         )
-        if result.scalar_one_or_none() is None:
+        model = result.scalar_one_or_none()
+        if model is None:
             raise TaskNotFoundError
+        return self._to_domain(model)
 
     async def delete(self, task_id: UUID) -> bool:
         result = await self._session.execute(

@@ -4,10 +4,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.application.task_service import TaskChanges
 from app.core.constants import TASK_TITLE_MAX_LENGTH, TASK_TITLE_MIN_LENGTH
 from app.core.messages import NULL_REQUIRED_FIELD_MESSAGE
 from app.domain.task import TaskPriority, TaskStatus
+from app.domain.task_repository import TaskChanges
 
 TaskTitle = Annotated[
     str, Field(min_length=TASK_TITLE_MIN_LENGTH, max_length=TASK_TITLE_MAX_LENGTH)
