@@ -39,6 +39,8 @@ def test_postgres_auth_token_rotation() -> None:
 
 async def _exercise_auth() -> None:
     email = f"auth-{uuid4()}@example.com"
+    updated_email = f"updated-{uuid4()}@example.com"
+    other_email = f"other-{uuid4()}@example.com"
     try:
         async with AsyncClient(
             transport=ASGITransport(app=create_app()), base_url="http://test"
@@ -87,6 +89,67 @@ async def _exercise_auth() -> None:
             assert me.status_code == 200
             assert me.json()["email"] == email
 
+            headers = {"Authorization": f"Bearer {pair['access_token']}"}
+            assert (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": other_email,
+                        "full_name": "Other User",
+                        "password": "secret-pass-123",
+                    },
+                )
+            ).status_code == 201
+            assert (
+                await client.patch(
+                    "/api/v1/users/me",
+                    json={"email": other_email},
+                    headers=headers,
+                )
+            ).status_code == 409
+            assert (await client.get("/api/v1/users/me", headers=headers)).json()[
+                "email"
+            ] == email
+            updated = await client.patch(
+                "/api/v1/users/me",
+                json={"email": updated_email.upper(), "full_name": "Updated Profile"},
+                headers=headers,
+            )
+            assert updated.status_code == 200
+            assert updated.json()["email"] == updated_email
+            assert updated.json()["full_name"] == "Updated Profile"
+            assert (
+                await client.post(
+                    "/api/v1/users/me/change-password",
+                    json={
+                        "current_password": "wrong-password",
+                        "new_password": "new-secret-pass-123",
+                    },
+                    headers=headers,
+                )
+            ).status_code == 400
+            changed = await client.post(
+                "/api/v1/users/me/change-password",
+                json={
+                    "current_password": "secret-pass-123",
+                    "new_password": "new-secret-pass-123",
+                },
+                headers=headers,
+            )
+            assert changed.status_code == 204
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": updated_email, "password": "secret-pass-123"},
+                )
+            ).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": updated_email, "password": "new-secret-pass-123"},
+                )
+            ).status_code == 200
+
             refreshed = await client.post(
                 "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
             )
@@ -115,11 +178,15 @@ async def _exercise_auth() -> None:
                 select(RefreshTokenModel).where(RefreshTokenModel.user_id == user_id)
             )
             stored_tokens = list(tokens)
-            assert len(stored_tokens) == 2
-            assert all(token.revoked_at is not None for token in stored_tokens)
+            assert len(stored_tokens) == 3
+            assert sum(token.revoked_at is not None for token in stored_tokens) == 2
     finally:
         async with session_factory() as session:
-            await session.execute(delete(UserModel).where(UserModel.email == email))
+            await session.execute(
+                delete(UserModel).where(
+                    UserModel.email.in_((email, updated_email, other_email))
+                )
+            )
             await session.commit()
         await engine.dispose()
 
