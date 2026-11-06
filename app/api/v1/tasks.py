@@ -18,10 +18,16 @@ from app.domain.task import Task
 projects_router = APIRouter(prefix="/projects", tags=["tasks"])
 tasks_router = APIRouter(prefix="/tasks", tags=["tasks"])
 TASK_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {"model": ErrorRead, "description": TASK_NOT_FOUND_MESSAGE}
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorRead,
+        "description": TASK_NOT_FOUND_MESSAGE,
+    }
 }
 PROJECT_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {"model": ErrorRead, "description": PROJECT_NOT_FOUND_MESSAGE}
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorRead,
+        "description": PROJECT_NOT_FOUND_MESSAGE,
+    }
 }
 
 

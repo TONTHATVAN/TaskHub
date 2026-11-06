@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
@@ -23,7 +23,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(NotFoundError)
     async def not_found_handler(_request: Request, exc: NotFoundError) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND, content={"detail": exc.message}
+        )
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:

@@ -1,15 +1,15 @@
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.auth_constants import INVALID_ACCESS_TOKEN_MESSAGE
+from app.api.exceptions import UnauthorizedException
 from app.application.auth_service import AuthService
 from app.application.profile_service import ProfileService
 from app.application.session_service import SessionService
 from app.application.task_service import TaskService
-from app.application.tokens import InvalidTokenError, JwtTokenService
+from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
@@ -94,20 +94,15 @@ async def get_current_user(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     tokens: Annotated[JwtTokenService, Depends(get_token_service)],
 ) -> User:
-    unauthorized = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=INVALID_ACCESS_TOKEN_MESSAGE,
-        headers={"WWW-Authenticate": "Bearer"},
-    )
     if credentials is None:
-        raise unauthorized
+        raise UnauthorizedException()
     try:
-        claims = tokens.decode(credentials.credentials, "access")
+        claims = tokens.decode(credentials.credentials, TokenType.ACCESS)
     except InvalidTokenError as exc:
-        raise unauthorized from exc
+        raise UnauthorizedException() from exc
     user = await users.get_by_id(claims.user_id)
     if user is None or not user.is_active:
-        raise unauthorized
+        raise UnauthorizedException()
     return user
 
 

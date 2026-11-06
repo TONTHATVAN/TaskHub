@@ -1,13 +1,16 @@
 from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.dependencies import CurrentUserDep, ProfileServiceDep
-from app.api.v1.auth_constants import EMAIL_ALREADY_REGISTERED_MESSAGE
 from app.api.v1.auth_schemas import (
     ChangePasswordRequest,
     ProfileUpdateRequest,
     UserRead,
 )
 from app.application.profile_service import IncorrectPasswordError
+from app.core.messages import (
+    CURRENT_PASSWORD_INCORRECT_MESSAGE,
+    EMAIL_ALREADY_REGISTERED_MESSAGE,
+)
 from app.domain.user import User
 from app.domain.user_repository import EmailAlreadyExistsError
 
@@ -24,16 +27,11 @@ async def update_me(
     payload: ProfileUpdateRequest, user: CurrentUserDep, service: ProfileServiceDep
 ) -> User:
     try:
-        return await service.update(
-            user,
-            email=payload.email if payload.email is not None else user.email,
-            full_name=payload.full_name
-            if payload.full_name is not None
-            else user.full_name,
-        )
+        return await service.update(user, payload.to_changes())
     except EmailAlreadyExistsError as exc:
         raise HTTPException(
-            status_code=409, detail=EMAIL_ALREADY_REGISTERED_MESSAGE
+            status_code=status.HTTP_409_CONFLICT,
+            detail=EMAIL_ALREADY_REGISTERED_MESSAGE,
         ) from exc
 
 
@@ -47,6 +45,7 @@ async def change_password(
         )
     except IncorrectPasswordError as exc:
         raise HTTPException(
-            status_code=400, detail="Current password is incorrect"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=CURRENT_PASSWORD_INCORRECT_MESSAGE,
         ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

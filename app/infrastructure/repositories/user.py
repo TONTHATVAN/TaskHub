@@ -4,8 +4,9 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.exceptions import UserNotFoundError
 from app.domain.user import User
-from app.domain.user_repository import EmailAlreadyExistsError
+from app.domain.user_repository import EmailAlreadyExistsError, UserProfileChanges
 from app.infrastructure.models import UserModel
 from app.infrastructure.repositories.base import BaseRepository
 
@@ -47,23 +48,28 @@ class SqlUserRepository:
             raise EmailAlreadyExistsError from exc
         return self._to_domain(model)
 
-    async def update_profile(self, user_id: UUID, email: str, full_name: str) -> User:
+    async def update_profile(self, user_id: UUID, changes: UserProfileChanges) -> User:
         try:
-            await self._session.execute(
+            result = await self._session.execute(
                 update(UserModel)
                 .where(UserModel.id == user_id)
-                .values(email=email, full_name=full_name)
+                .values(**changes)
+                .returning(UserModel)
+                .execution_options(populate_existing=True)
             )
-            await self._session.flush()
         except IntegrityError as exc:
             raise EmailAlreadyExistsError from exc
-        user = await self.get_by_id(user_id)
-        assert user is not None
-        return user
+        model = result.scalar_one_or_none()
+        if model is None:
+            raise UserNotFoundError
+        return self._to_domain(model)
 
     async def update_password(self, user_id: UUID, hashed_password: str) -> None:
-        await self._session.execute(
+        result = await self._session.execute(
             update(UserModel)
             .where(UserModel.id == user_id)
             .values(hashed_password=hashed_password)
+            .returning(UserModel.id)
         )
+        if result.scalar_one_or_none() is None:
+            raise UserNotFoundError

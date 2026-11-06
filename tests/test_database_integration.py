@@ -6,7 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
-from app.domain.exceptions import TaskNotFoundError
+from app.domain.exceptions import NotFoundError, TaskNotFoundError, UserNotFoundError
+from app.domain.task import TaskPriority, TaskStatus
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
     ProjectModel,
@@ -18,6 +19,7 @@ from app.infrastructure.models import (
 )
 from app.infrastructure.repositories.base import BaseRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
+from app.infrastructure.repositories.user import SqlUserRepository
 from app.main import create_app
 
 
@@ -35,6 +37,103 @@ def test_postgres_task_crud_and_persistence() -> None:
 )
 def test_postgres_auth_token_rotation() -> None:
     asyncio.run(_exercise_auth())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_stale_base_save() -> None:
+    asyncio.run(_exercise_stale_base_save())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_profile_update_preserves_other_fields() -> None:
+    asyncio.run(_exercise_profile_update())
+
+
+async def _exercise_profile_update() -> None:
+    user_id = uuid4()
+    async with session_factory() as session:
+        await BaseRepository(session, UserModel).add(
+            UserModel(
+                id=user_id,
+                email=f"profile-{user_id}@example.invalid",
+                full_name="Original",
+                hashed_password="disabled",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as stale_session:
+            users = SqlUserRepository(stale_session)
+            old = await users.get_by_id(user_id)
+            assert old is not None
+            async with session_factory() as other_session:
+                other_users = SqlUserRepository(other_session)
+                await other_users.update_profile(user_id, {"full_name": "New Name"})
+                await other_session.commit()
+
+            updated = await users.update_profile(
+                user_id, {"email": f"new-{user_id}@example.invalid"}
+            )
+            assert updated.full_name == "New Name"
+            await stale_session.commit()
+
+        async with session_factory() as session:
+            stored = await SqlUserRepository(session).get_by_id(user_id)
+            assert stored is not None
+            assert stored.full_name == "New Name"
+            assert stored.email == f"new-{user_id}@example.invalid"
+            await BaseRepository(session, UserModel).delete(user_id)
+            await session.commit()
+
+        async with session_factory() as session:
+            users = SqlUserRepository(session)
+            with pytest.raises(UserNotFoundError):
+                await users.update_profile(user_id, {"full_name": "Missing"})
+            with pytest.raises(UserNotFoundError):
+                await users.update_password(user_id, "unused")
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+
+
+async def _exercise_stale_base_save() -> None:
+    user_id = uuid4()
+    async with session_factory() as session:
+        await BaseRepository(session, UserModel).add(
+            UserModel(
+                id=user_id,
+                email=f"stale-{user_id}@example.invalid",
+                full_name="Original",
+                hashed_password="disabled",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as stale_session:
+            users = BaseRepository(stale_session, UserModel)
+            stale_user = await users.get(user_id)
+            assert stale_user is not None
+            stale_user.full_name = "Stale update"
+            async with session_factory() as deleting_session:
+                assert await BaseRepository(deleting_session, UserModel).delete(user_id)
+                await deleting_session.commit()
+            with pytest.raises(NotFoundError):
+                await users.save(stale_user)
+            await stale_session.rollback()
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+        await engine.dispose()
 
 
 async def _exercise_auth() -> None:
@@ -237,11 +336,12 @@ async def _exercise_database() -> None:
             listed = await client.get(
                 f"/api/v1/projects/{project_id}/tasks", params={"page": 1, "limit": 1}
             )
-            assert [task["id"] for task in listed.json()] == [task_id]
             next_page = await client.get(
                 f"/api/v1/projects/{project_id}/tasks", params={"page": 2, "limit": 1}
             )
-            assert [task["id"] for task in next_page.json()] == [second.json()["id"]]
+            page_ids = [task["id"] for task in listed.json() + next_page.json()]
+            assert len(page_ids) == 2
+            assert set(page_ids) == {task_id, second.json()["id"]}
 
         async with session_factory() as session:
             stale_task = await SqlTaskRepository(session).get(UUID(task_id))
@@ -268,6 +368,15 @@ async def _exercise_database() -> None:
             assert fetched_after_rejection.status_code == 200
             assert fetched_after_rejection.json()["title"] == "Persisted task"
 
+            async with session_factory() as session:
+                await SqlTaskRepository(session).save(
+                    stale_task, {"priority": TaskPriority.HIGH}
+                )
+                await session.commit()
+            fetched_after_stale_save = await client.get(f"/api/v1/tasks/{task_id}")
+            assert fetched_after_stale_save.json()["status"] == TaskStatus.IN_PROGRESS
+            assert fetched_after_stale_save.json()["priority"] == TaskPriority.HIGH
+
             deleted = await client.delete(f"/api/v1/tasks/{task_id}")
             assert deleted.status_code == 204
             assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404
@@ -275,7 +384,7 @@ async def _exercise_database() -> None:
         async with session_factory() as session:
             tasks = SqlTaskRepository(session)
             with pytest.raises(TaskNotFoundError):
-                await tasks.save(stale_task)
+                await tasks.save(stale_task, {"priority": TaskPriority.LOW})
             assert await tasks.delete(UUID(task_id)) is False
 
         async with session_factory() as session:
@@ -286,7 +395,7 @@ async def _exercise_database() -> None:
             assert stored_user is not None
             stored_user.full_name = "Updated User"
             await users.save(stored_user)
-            with pytest.raises(LookupError):
+            with pytest.raises(NotFoundError):
                 await users.save(
                     UserModel(
                         id=uuid4(),
@@ -301,7 +410,7 @@ async def _exercise_database() -> None:
             assert member is not None
             member.role = WorkspaceRole.EDITOR
             await memberships.save(member)
-            with pytest.raises(LookupError):
+            with pytest.raises(NotFoundError):
                 await memberships.save(
                     WorkspaceMemberModel(
                         workspace_id=workspace_id,

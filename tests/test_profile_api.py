@@ -62,7 +62,9 @@ def test_profile_update_and_password_change() -> None:
             {"full_name": None},
             {"full_name": "  "},
             {"full_name": "x" * 201},
+            {"full_name": 123},
             {"email": "invalid"},
+            {"email": f"{'a' * 310}@example.com"},
         ):
             assert (
                 client.patch(
@@ -82,6 +84,22 @@ def test_profile_update_and_password_change() -> None:
             == "first@example.com"
         )
 
+        name_only = client.patch(
+            "/api/v1/users/me", json={"full_name": "  Only Name  "}, headers=headers
+        )
+        assert name_only.status_code == 200
+        assert name_only.json()["full_name"] == "Only Name"
+        assert name_only.json()["email"] == "first@example.com"
+
+        email_only = client.patch(
+            "/api/v1/users/me",
+            json={"email": "only.email@example.com"},
+            headers=headers,
+        )
+        assert email_only.status_code == 200
+        assert email_only.json()["email"] == "only.email@example.com"
+        assert email_only.json()["full_name"] == "Only Name"
+
         updated = client.patch(
             "/api/v1/users/me",
             json={"email": "FIRST.NEW@EXAMPLE.COM", "full_name": "  New Name  "},
@@ -97,7 +115,7 @@ def test_profile_update_and_password_change() -> None:
         )
 
         endpoint = "/api/v1/users/me/change-password"
-        for new_password in ("short", "đ" * 40):
+        for new_password in ("short", "a" * 73, "đ" * 40):
             assert (
                 client.post(
                     endpoint,
@@ -109,6 +127,14 @@ def test_profile_update_and_password_change() -> None:
                 ).status_code
                 == 422
             )
+        assert (
+            client.post(
+                endpoint,
+                json={"current_password": "đ" * 40, "new_password": "new-password"},
+                headers=headers,
+            ).status_code
+            == 422
+        )
         assert (
             client.post(
                 endpoint,
