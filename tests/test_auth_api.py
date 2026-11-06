@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import jwt
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
@@ -12,7 +13,8 @@ from app.api.dependencies import (
     get_user_repository,
 )
 from app.application.passwords import verify_password
-from app.application.tokens import JwtTokenService
+from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
+from app.core.constants import JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER
 from app.domain.user import User, UserRole
 from app.domain.user_repository import UserRepository
 from app.main import create_app
@@ -137,6 +139,25 @@ def test_password_hash_verification() -> None:
     asyncio.run(check())
 
 
+def test_token_types_and_jwt_settings() -> None:
+    tokens = JwtTokenService("test-secret" * 4, 15, 7)
+    user_id = uuid4()
+    access = tokens.issue_access(user_id)
+    refresh, token_id, _ = tokens.issue_refresh(user_id)
+    assert tokens.decode(access, TokenType.ACCESS).user_id == user_id
+    assert tokens.decode(refresh, TokenType.REFRESH).token_id == token_id
+    with pytest.raises(InvalidTokenError):
+        tokens.decode(access, TokenType.REFRESH)
+    payload = jwt.decode(
+        access,
+        "test-secret" * 4,
+        algorithms=[JWT_ALGORITHM],
+        audience=JWT_AUDIENCE,
+        issuer=JWT_ISSUER,
+    )
+    assert payload["type"] == TokenType.ACCESS
+
+
 def test_login_refresh_logout_and_profile() -> None:
     users = MemoryUserRepository()
     refresh_tokens = MemoryRefreshTokenRepository()
@@ -158,11 +179,27 @@ def test_login_refresh_logout_and_profile() -> None:
         )
         assert registered.status_code == 201
 
-        assert client.get("/api/v1/users/me").status_code == 401
+        unauthorized = client.get("/api/v1/users/me")
+        assert unauthorized.status_code == 401
+        assert unauthorized.headers["WWW-Authenticate"] == "Bearer"
+        wrong_password = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "wrong"},
+        )
+        assert wrong_password.status_code == 401
+        assert wrong_password.headers["WWW-Authenticate"] == "Bearer"
+        for password in ("x" * 73, "đ" * 40):
+            assert (
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"email": "user@example.com", "password": password},
+                ).status_code
+                == 422
+            )
         assert (
             client.post(
                 "/api/v1/auth/login",
-                json={"email": "user@example.com", "password": "wrong"},
+                json={"email": "user@example.com", "password": "x" * 72},
             ).status_code
             == 401
         )
@@ -182,24 +219,23 @@ def test_login_refresh_logout_and_profile() -> None:
             == registered.json()["id"]
         )
 
-        assert (
-            client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": pair["access_token"]}
-            ).status_code
-            == 401
+        invalid_refresh = client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": pair["access_token"]}
         )
+        assert invalid_refresh.status_code == 401
+        assert invalid_refresh.json() == {"detail": "Invalid refresh token"}
+        assert invalid_refresh.headers["WWW-Authenticate"] == "Bearer"
         refreshed = client.post(
             "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
         )
         assert refreshed.status_code == 200
         new_pair = refreshed.json()
         assert new_pair["refresh_token"] != pair["refresh_token"]
-        assert (
-            client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
-            ).status_code
-            == 401
+        consumed_refresh = client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
         )
+        assert consumed_refresh.status_code == 401
+        assert consumed_refresh.headers["WWW-Authenticate"] == "Bearer"
 
         assert (
             client.post(
@@ -214,6 +250,11 @@ def test_login_refresh_logout_and_profile() -> None:
             ).status_code
             == 401
         )
+        invalid_logout = client.post(
+            "/api/v1/auth/logout", json={"refresh_token": new_pair["refresh_token"]}
+        )
+        assert invalid_logout.status_code == 401
+        assert invalid_logout.headers["WWW-Authenticate"] == "Bearer"
         assert (
             client.get(
                 "/api/v1/users/me",
