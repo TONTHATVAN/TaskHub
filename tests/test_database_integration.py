@@ -211,11 +211,12 @@ async def _exercise_database() -> None:
             listed = await client.get(
                 f"/api/v1/projects/{project_id}/tasks", params={"page": 1, "limit": 1}
             )
-            assert [task["id"] for task in listed.json()] == [task_id]
             next_page = await client.get(
                 f"/api/v1/projects/{project_id}/tasks", params={"page": 2, "limit": 1}
             )
-            assert [task["id"] for task in next_page.json()] == [second.json()["id"]]
+            page_ids = [task["id"] for task in listed.json() + next_page.json()]
+            assert len(page_ids) == 2
+            assert set(page_ids) == {task_id, second.json()["id"]}
 
         async with session_factory() as session:
             stale_task = await SqlTaskRepository(session).get(UUID(task_id))

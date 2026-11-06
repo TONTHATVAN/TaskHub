@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.task import Task
 from app.domain.task_repository import TaskChanges
 
@@ -15,9 +16,12 @@ class InMemoryTaskRepository:
         self._tasks[task.id] = task
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]:
-        tasks = [task for task in self._tasks.values() if task.project_id == project_id]
+        tasks = sorted(
+            (task for task in self._tasks.values() if task.project_id == project_id),
+            key=lambda task: (task.created_at, task.id),
+        )
         return tasks[(page - 1) * limit : page * limit]
 
     async def get(self, task_id: UUID) -> Task | None:

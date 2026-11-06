@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import TaskNotFoundError
 from app.domain.task import Task
 from app.domain.task_repository import TaskChanges
@@ -47,7 +48,7 @@ class SqlTaskRepository:
         return self._to_domain(model) if model else None
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]:
         result = await self._session.scalars(
             select(TaskModel)

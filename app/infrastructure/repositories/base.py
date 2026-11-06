@@ -4,6 +4,14 @@ from uuid import UUID
 from sqlalchemy import delete, func, inspect, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import (
+    LIMIT_DEFAULT,
+    LIMIT_MAX,
+    LIMIT_MIN,
+    PAGE_DEFAULT,
+    PAGE_MIN,
+)
+from app.core.messages import PAGINATION_OUT_OF_RANGE_MESSAGE
 from app.domain.exceptions import NotFoundError
 from app.infrastructure.models import Base
 
@@ -24,9 +32,11 @@ class BaseRepository(Generic[ModelT]):
     async def get(self, entity_id: EntityId) -> ModelT | None:
         return await self.session.get(self.model, entity_id)
 
-    async def list(self, *, page: int = 1, limit: int = 20) -> tuple[list[ModelT], int]:
-        if page < 1 or not 1 <= limit <= 100:
-            raise ValueError("page and limit are out of range")
+    async def list(
+        self, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
+    ) -> tuple[list[ModelT], int]:
+        if page < PAGE_MIN or not LIMIT_MIN <= limit <= LIMIT_MAX:
+            raise ValueError(PAGINATION_OUT_OF_RANGE_MESSAGE)
         total = await self.session.scalar(select(func.count()).select_from(self.model))
         result = await self.session.scalars(
             select(self.model)
