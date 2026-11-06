@@ -1,18 +1,10 @@
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import TypedDict
 from uuid import UUID, uuid4
 
 from app.domain.exceptions import ProjectNotFoundError, TaskNotFoundError
 from app.domain.task import Task, TaskPriority, TaskStatus
-from app.domain.task_repository import TaskRepository
-
-
-class TaskChanges(TypedDict, total=False):
-    title: str
-    description: str | None
-    status: TaskStatus
-    priority: TaskPriority
+from app.domain.task_repository import TaskChanges, TaskRepository
 
 
 class TaskService:
@@ -57,7 +49,8 @@ class TaskService:
     async def update(self, task_id: UUID, changes: TaskChanges) -> Task:
         task = await self.get(task_id)
         updated_task = replace(task, **changes)
-        await self._repository.save(updated_task)
+        if changes:
+            return await self._repository.save(updated_task, changes)
         return updated_task
 
     async def delete(self, task_id: UUID) -> None:

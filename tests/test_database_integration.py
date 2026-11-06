@@ -6,7 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
-from app.domain.exceptions import TaskNotFoundError
+from app.domain.exceptions import NotFoundError, TaskNotFoundError
+from app.domain.task import TaskPriority, TaskStatus
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
     ProjectModel,
@@ -35,6 +36,46 @@ def test_postgres_task_crud_and_persistence() -> None:
 )
 def test_postgres_auth_token_rotation() -> None:
     asyncio.run(_exercise_auth())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_stale_base_save() -> None:
+    asyncio.run(_exercise_stale_base_save())
+
+
+async def _exercise_stale_base_save() -> None:
+    user_id = uuid4()
+    async with session_factory() as session:
+        await BaseRepository(session, UserModel).add(
+            UserModel(
+                id=user_id,
+                email=f"stale-{user_id}@example.invalid",
+                full_name="Original",
+                hashed_password="disabled",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as stale_session:
+            users = BaseRepository(stale_session, UserModel)
+            stale_user = await users.get(user_id)
+            assert stale_user is not None
+            stale_user.full_name = "Stale update"
+            async with session_factory() as deleting_session:
+                assert await BaseRepository(deleting_session, UserModel).delete(user_id)
+                await deleting_session.commit()
+            with pytest.raises(NotFoundError):
+                await users.save(stale_user)
+            await stale_session.rollback()
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+        await engine.dispose()
 
 
 async def _exercise_auth() -> None:
@@ -201,6 +242,15 @@ async def _exercise_database() -> None:
             assert fetched_after_rejection.status_code == 200
             assert fetched_after_rejection.json()["title"] == "Persisted task"
 
+            async with session_factory() as session:
+                await SqlTaskRepository(session).save(
+                    stale_task, {"priority": TaskPriority.HIGH}
+                )
+                await session.commit()
+            fetched_after_stale_save = await client.get(f"/api/v1/tasks/{task_id}")
+            assert fetched_after_stale_save.json()["status"] == TaskStatus.IN_PROGRESS
+            assert fetched_after_stale_save.json()["priority"] == TaskPriority.HIGH
+
             deleted = await client.delete(f"/api/v1/tasks/{task_id}")
             assert deleted.status_code == 204
             assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404
@@ -208,7 +258,7 @@ async def _exercise_database() -> None:
         async with session_factory() as session:
             tasks = SqlTaskRepository(session)
             with pytest.raises(TaskNotFoundError):
-                await tasks.save(stale_task)
+                await tasks.save(stale_task, {"priority": TaskPriority.LOW})
             assert await tasks.delete(UUID(task_id)) is False
 
         async with session_factory() as session:
@@ -219,7 +269,7 @@ async def _exercise_database() -> None:
             assert stored_user is not None
             stored_user.full_name = "Updated User"
             await users.save(stored_user)
-            with pytest.raises(LookupError):
+            with pytest.raises(NotFoundError):
                 await users.save(
                     UserModel(
                         id=uuid4(),
@@ -234,7 +284,7 @@ async def _exercise_database() -> None:
             assert member is not None
             member.role = WorkspaceRole.EDITOR
             await memberships.save(member)
-            with pytest.raises(LookupError):
+            with pytest.raises(NotFoundError):
                 await memberships.save(
                     WorkspaceMemberModel(
                         workspace_id=workspace_id,
