@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import TaskNotFoundError
 from app.domain.task import Task
 from app.infrastructure.models import ProjectModel, TaskModel
@@ -46,7 +47,7 @@ class SqlTaskRepository:
         return self._to_domain(model) if model else None
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]:
         result = await self._session.scalars(
             select(TaskModel)
@@ -58,14 +59,22 @@ class SqlTaskRepository:
         return [self._to_domain(model) for model in result]
 
     async def save(self, task: Task) -> None:
-        model = await self._repository.get(task.id)
-        if model is None:
+        result = await self._session.execute(
+            update(TaskModel)
+            .where(TaskModel.id == task.id)
+            .values(
+                title=task.title,
+                description=task.description,
+                status=task.status,
+                priority=task.priority,
+            )
+            .returning(TaskModel.id)
+        )
+        if result.scalar_one_or_none() is None:
             raise TaskNotFoundError
-        model.title = task.title
-        model.description = task.description
-        model.status = task.status
-        model.priority = task.priority
-        await self._repository.save(model)
 
     async def delete(self, task_id: UUID) -> bool:
-        return await self._repository.delete(task_id)
+        result = await self._session.execute(
+            delete(TaskModel).where(TaskModel.id == task_id).returning(TaskModel.id)
+        )
+        return result.scalar_one_or_none() is not None

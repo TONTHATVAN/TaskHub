@@ -1,6 +1,7 @@
 from typing import Protocol
 from uuid import UUID
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.task import Task
 
 
@@ -10,7 +11,7 @@ class TaskRepository(Protocol):
     async def add(self, task: Task) -> None: ...
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]: ...
 
     async def get(self, task_id: UUID) -> Task | None: ...
