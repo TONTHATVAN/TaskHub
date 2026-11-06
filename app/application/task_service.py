@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import TypedDict
 from uuid import UUID, uuid4
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import ProjectNotFoundError, TaskNotFoundError
 from app.domain.task import Task, TaskPriority, TaskStatus
 from app.domain.task_repository import TaskRepository
@@ -42,7 +43,7 @@ class TaskService:
         return task
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]:
         return await self._repository.list_by_project(
             project_id, page=page, limit=limit
