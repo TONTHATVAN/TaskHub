@@ -2,7 +2,12 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from app.application.passwords import verify_password
-from app.application.tokens import InvalidTokenError, JwtTokenService, TokenPair
+from app.application.tokens import (
+    InvalidTokenError,
+    JwtTokenService,
+    TokenPair,
+    TokenType,
+)
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.user_repository import UserRepository
 
@@ -33,26 +38,27 @@ class SessionService:
         return await self._issue_pair(user.id)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
-        claims = self._tokens.decode(refresh_token, "refresh")
-        if claims.token_id is None:
-            raise InvalidTokenError
-        user = await self._users.get_by_id(claims.user_id)
-        if user is None or not user.is_active:
-            raise InvalidTokenError
-        if not await self._refresh_tokens.consume(
-            claims.token_id, user.id, datetime.now(UTC)
-        ):
-            raise InvalidTokenError
-        return await self._issue_pair(user.id)
+        user_id = await self._consume_refresh_token(refresh_token, require_active=True)
+        return await self._issue_pair(user_id)
 
     async def logout(self, refresh_token: str) -> None:
-        claims = self._tokens.decode(refresh_token, "refresh")
+        await self._consume_refresh_token(refresh_token)
+
+    async def _consume_refresh_token(
+        self, refresh_token: str, *, require_active: bool = False
+    ) -> UUID:
+        claims = self._tokens.decode(refresh_token, TokenType.REFRESH)
         if claims.token_id is None:
             raise InvalidTokenError
+        if require_active:
+            user = await self._users.get_by_id(claims.user_id)
+            if user is None or not user.is_active:
+                raise InvalidTokenError
         if not await self._refresh_tokens.consume(
             claims.token_id, claims.user_id, datetime.now(UTC)
         ):
             raise InvalidTokenError
+        return claims.user_id
 
     async def _issue_pair(self, user_id: UUID) -> TokenPair:
         access_token = self._tokens.issue_access(user_id)

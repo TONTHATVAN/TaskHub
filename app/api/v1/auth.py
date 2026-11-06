@@ -1,11 +1,7 @@
 from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.dependencies import AuthServiceDep, SessionServiceDep
-from app.api.v1.auth_constants import (
-    EMAIL_ALREADY_REGISTERED_MESSAGE,
-    INVALID_CREDENTIALS_MESSAGE,
-    INVALID_REFRESH_TOKEN_MESSAGE,
-)
+from app.api.exceptions import InvalidRefreshTokenException, UnauthorizedException
 from app.api.v1.auth_schemas import (
     LoginRequest,
     RefreshRequest,
@@ -15,6 +11,10 @@ from app.api.v1.auth_schemas import (
 )
 from app.application.session_service import InvalidCredentialsError
 from app.application.tokens import InvalidTokenError, TokenPair
+from app.core.messages import (
+    EMAIL_ALREADY_REGISTERED_MESSAGE,
+    INVALID_CREDENTIALS_MESSAGE,
+)
 from app.domain.user import User
 from app.domain.user_repository import EmailAlreadyExistsError
 
@@ -38,9 +38,7 @@ async def login(payload: LoginRequest, service: SessionServiceDep) -> TokenPair:
     try:
         return await service.login(payload.email, payload.password)
     except InvalidCredentialsError as exc:
-        raise HTTPException(
-            status_code=401, detail=INVALID_CREDENTIALS_MESSAGE
-        ) from exc
+        raise UnauthorizedException(INVALID_CREDENTIALS_MESSAGE) from exc
 
 
 @router.post("/refresh", response_model=TokenPairRead)
@@ -48,9 +46,7 @@ async def refresh(payload: RefreshRequest, service: SessionServiceDep) -> TokenP
     try:
         return await service.refresh(payload.refresh_token)
     except InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=401, detail=INVALID_REFRESH_TOKEN_MESSAGE
-        ) from exc
+        raise InvalidRefreshTokenException() from exc
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -58,7 +54,5 @@ async def logout(payload: RefreshRequest, service: SessionServiceDep) -> Respons
     try:
         await service.logout(payload.refresh_token)
     except InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=401, detail=INVALID_REFRESH_TOKEN_MESSAGE
-        ) from exc
+        raise InvalidRefreshTokenException() from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
