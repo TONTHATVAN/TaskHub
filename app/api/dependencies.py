@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_constants import INVALID_ACCESS_TOKEN_MESSAGE
 from app.application.auth_service import AuthService
+from app.application.profile_service import ProfileService
 from app.application.session_service import SessionService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService
@@ -48,6 +49,15 @@ def get_auth_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_profile_service(
+    repository: Annotated[UserRepository, Depends(get_user_repository)],
+) -> ProfileService:
+    return ProfileService(repository)
+
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 
 
 async def get_refresh_token_repository(

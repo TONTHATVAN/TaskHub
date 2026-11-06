@@ -41,6 +41,23 @@ class MemoryUserRepository:
         self.users[email] = user
         return user
 
+    async def update_profile(self, user_id: UUID, email: str, full_name: str) -> User:
+        from app.domain.user_repository import EmailAlreadyExistsError
+
+        user = await self.get_by_id(user_id)
+        assert user is not None
+        if email != user.email and email in self.users:
+            raise EmailAlreadyExistsError
+        del self.users[user.email]
+        updated = replace(user, email=email, full_name=full_name)
+        self.users[email] = updated
+        return updated
+
+    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+        user = await self.get_by_id(user_id)
+        assert user is not None
+        self.users[user.email] = replace(user, hashed_password=hashed_password)
+
 
 class MemoryRefreshTokenRepository:
     def __init__(self) -> None:

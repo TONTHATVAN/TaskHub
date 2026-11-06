@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,3 +46,24 @@ class SqlUserRepository:
         except IntegrityError as exc:
             raise EmailAlreadyExistsError from exc
         return self._to_domain(model)
+
+    async def update_profile(self, user_id: UUID, email: str, full_name: str) -> User:
+        try:
+            await self._session.execute(
+                update(UserModel)
+                .where(UserModel.id == user_id)
+                .values(email=email, full_name=full_name)
+            )
+            await self._session.flush()
+        except IntegrityError as exc:
+            raise EmailAlreadyExistsError from exc
+        user = await self.get_by_id(user_id)
+        assert user is not None
+        return user
+
+    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+        await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(hashed_password=hashed_password)
+        )

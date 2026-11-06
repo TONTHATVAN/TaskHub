@@ -114,3 +114,9 @@ Sau khi cập nhật mã, chạy migration mới:
 ```powershell
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
+
+## Buổi 4 — quản lý hồ sơ (phần đầu)
+
+Người dùng đã đăng nhập có thể cập nhật email và tên qua `PATCH /api/v1/users/me`, hoặc đổi mật khẩu qua `POST /api/v1/users/me/change-password` với `current_password` và `new_password`. Các endpoint này yêu cầu Bearer access token. Email được chuẩn hóa về chữ thường; email trùng trả 409, mật khẩu hiện tại sai trả 400. Mật khẩu mới phải có ít nhất 8 ký tự và tối đa 72 byte UTF-8. Đổi mật khẩu thành công trả 204; access token hiện có tiếp tục hiệu lực đến khi hết hạn.
+
+Phần tiếp theo của buổi 4 là phân quyền theo workspace/project và bảo vệ các endpoint Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.
