@@ -3,3 +3,8 @@ INVALID_CREDENTIALS_MESSAGE = "Invalid credentials"
 INVALID_REFRESH_TOKEN_MESSAGE = "Invalid refresh token"
 INVALID_ACCESS_TOKEN_MESSAGE = "Invalid or missing access token"
 PASSWORD_TOO_LONG_MESSAGE = "Password must be at most 72 bytes"
+
+NULL_REQUIRED_FIELD_MESSAGE = "This field cannot be null"
+TASK_NOT_FOUND_MESSAGE = "Task not found"
+PROJECT_NOT_FOUND_MESSAGE = "Project not found"
+PAGINATION_OUT_OF_RANGE_MESSAGE = "page and limit are out of range"

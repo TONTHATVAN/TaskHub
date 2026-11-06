@@ -1,9 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
+from app.domain.exceptions import TaskNotFoundError
 from app.domain.task import Task
+from app.domain.task_repository import TaskChanges
 from app.infrastructure.models import ProjectModel, TaskModel
 from app.infrastructure.repositories.base import BaseRepository
 
@@ -45,7 +48,7 @@ class SqlTaskRepository:
         return self._to_domain(model) if model else None
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = 1, limit: int = 20
+        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
     ) -> list[Task]:
         result = await self._session.scalars(
             select(TaskModel)
@@ -56,15 +59,21 @@ class SqlTaskRepository:
         )
         return [self._to_domain(model) for model in result]
 
-    async def save(self, task: Task) -> None:
-        model = await self._repository.get(task.id)
+    async def save(self, task: Task, changes: TaskChanges) -> Task:
+        result = await self._session.execute(
+            update(TaskModel)
+            .where(TaskModel.id == task.id)
+            .values(**changes)
+            .returning(TaskModel)
+            .execution_options(populate_existing=True)
+        )
+        model = result.scalar_one_or_none()
         if model is None:
-            raise ValueError("Task not found")
-        model.title = task.title
-        model.description = task.description
-        model.status = task.status
-        model.priority = task.priority
-        await self._repository.save(model)
+            raise TaskNotFoundError
+        return self._to_domain(model)
 
     async def delete(self, task_id: UUID) -> bool:
-        return await self._repository.delete(task_id)
+        result = await self._session.execute(
+            delete(TaskModel).where(TaskModel.id == task_id).returning(TaskModel.id)
+        )
+        return result.scalar_one_or_none() is not None
