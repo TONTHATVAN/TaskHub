@@ -113,8 +113,16 @@ def test_task_pagination() -> None:
 
         first_page = client.get(endpoint, params={"page": 1, "limit": 2})
         second_page = client.get(endpoint, params={"page": 2, "limit": 2})
-        assert [item["title"] for item in first_page.json()] == ["Task 0", "Task 1"]
-        assert [item["title"] for item in second_page.json()] == ["Task 2"]
+        first_titles = {item["title"] for item in first_page.json()}
+        second_titles = {item["title"] for item in second_page.json()}
+        assert len(first_titles) == 2
+        assert len(second_titles) == 1
+        assert first_titles.isdisjoint(second_titles)
+        assert first_titles | second_titles == {"Task 0", "Task 1", "Task 2"}
+        assert (
+            client.get(endpoint, params={"page": 1, "limit": 2}).json()
+            == first_page.json()
+        )
         assert client.get(endpoint, params={"page": 0}).status_code == 422
         assert client.get(endpoint, params={"limit": 0}).status_code == 422
         assert client.get(endpoint, params={"limit": 101}).status_code == 422

@@ -2,6 +2,7 @@ from uuid import UUID
 
 from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.task import Task
+from app.domain.task_repository import TaskChanges
 
 
 class InMemoryTaskRepository:
@@ -26,8 +27,9 @@ class InMemoryTaskRepository:
     async def get(self, task_id: UUID) -> Task | None:
         return self._tasks.get(task_id)
 
-    async def save(self, task: Task) -> None:
+    async def save(self, task: Task, changes: TaskChanges) -> Task:
         self._tasks[task.id] = task
+        return task
 
     async def delete(self, task_id: UUID) -> bool:
         return self._tasks.pop(task_id, None) is not None
