@@ -4,7 +4,9 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.dependencies import CurrentUserDep, TaskAuthorizationDep, TaskServiceDep
-from app.api.v1.task_schemas import ErrorRead, TaskCreate, TaskRead, TaskUpdate
+from app.api.v1.error_responses import ACCESS_DENIED_RESPONSES, UNAUTHORIZED_RESPONSES
+from app.api.v1.error_schemas import ErrorRead
+from app.api.v1.task_schemas import TaskCreate, TaskRead, TaskUpdate
 from app.core.constants import (
     LIMIT_DEFAULT,
     LIMIT_MAX,
@@ -12,12 +14,7 @@ from app.core.constants import (
     PAGE_DEFAULT,
     PAGE_MIN,
 )
-from app.core.messages import (
-    ACCESS_DENIED_MESSAGE,
-    INVALID_ACCESS_TOKEN_MESSAGE,
-    PROJECT_NOT_FOUND_MESSAGE,
-    TASK_NOT_FOUND_MESSAGE,
-)
+from app.core.messages import PROJECT_NOT_FOUND_MESSAGE, TASK_NOT_FOUND_MESSAGE
 from app.domain.task import Task
 
 projects_router = APIRouter(prefix="/projects", tags=["tasks"])
@@ -32,19 +29,6 @@ PROJECT_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_404_NOT_FOUND: {
         "model": ErrorRead,
         "description": PROJECT_NOT_FOUND_MESSAGE,
-    }
-}
-ACCESS_DENIED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_403_FORBIDDEN: {
-        "model": ErrorRead,
-        "description": ACCESS_DENIED_MESSAGE,
-    }
-}
-UNAUTHORIZED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_401_UNAUTHORIZED: {
-        "model": ErrorRead,
-        "description": INVALID_ACCESS_TOKEN_MESSAGE,
-        "headers": {"WWW-Authenticate": {"schema": {"type": "string"}}},
     }
 }
 PROJECT_RESPONSES = (

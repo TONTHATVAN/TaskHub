@@ -52,7 +52,3 @@ class TaskRead(BaseModel):
     status: TaskStatus
     priority: TaskPriority
     created_at: datetime
-
-
-class ErrorRead(BaseModel):
-    detail: str

@@ -3,6 +3,7 @@ from app.core.messages import (
     PROJECT_NOT_FOUND_MESSAGE,
     TASK_NOT_FOUND_MESSAGE,
     USER_NOT_FOUND_MESSAGE,
+    WORKSPACE_NOT_FOUND_MESSAGE,
 )
 
 
@@ -33,3 +34,8 @@ class TaskNotFoundError(NotFoundError):
 class UserNotFoundError(NotFoundError):
     def __init__(self) -> None:
         super().__init__(USER_NOT_FOUND_MESSAGE)
+
+
+class WorkspaceNotFoundError(NotFoundError):
+    def __init__(self) -> None:
+        super().__init__(WORKSPACE_NOT_FOUND_MESSAGE)

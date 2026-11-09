@@ -19,6 +19,7 @@ from app.core.constants import (
     TASK_TITLE_MAX_LENGTH,
     USER_EMAIL_MAX_LENGTH,
     USER_FULL_NAME_MAX_LENGTH,
+    WORKSPACE_NAME_MAX_LENGTH,
 )
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.user import UserRole
@@ -96,7 +97,7 @@ class WorkspaceModel(Base):
     id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid4
     )
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(WORKSPACE_NAME_MAX_LENGTH))
     owner_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )

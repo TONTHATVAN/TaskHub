@@ -11,16 +11,19 @@ from app.application.session_service import SessionService
 from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
+from app.application.workspace_service import WorkspaceService
 from app.domain.authorization import ProjectAccessRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
+from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
 from app.infrastructure.repositories.user import SqlUserRepository
+from app.infrastructure.repositories.workspace import SqlWorkspaceRepository
 from app.infrastructure.settings import settings
 
 
@@ -55,6 +58,21 @@ def get_task_authorization_service(
 TaskAuthorizationDep = Annotated[
     TaskAuthorizationService, Depends(get_task_authorization_service)
 ]
+
+
+async def get_workspace_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> WorkspaceRepository:
+    return SqlWorkspaceRepository(session)
+
+
+def get_workspace_service(
+    repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+) -> WorkspaceService:
+    return WorkspaceService(repository)
+
+
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 async def get_user_repository(

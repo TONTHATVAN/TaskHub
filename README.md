@@ -66,7 +66,7 @@ Mở `http://127.0.0.1:8000/docs` để thử API. Endpoint kiểm tra ứng d�
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. API tạo workspace và project sẽ được triển khai ở các buổi tiếp theo; hiện tại cần tạo các bản ghi này trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
+Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. Workspace có thể tạo qua API; API tạo Project sẽ được triển khai tiếp, nên hiện tại cần tạo Project trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
 
 `BaseRepository[T]` cung cấp thêm, lấy, liệt kê có phân trang, cập nhật và xóa model. `SqlTaskRepository` chuyển giữa model SQLAlchemy và entity Task trong domain. Mỗi request sử dụng một `AsyncSession`; giao dịch được commit khi xử lý thành công và rollback nếu có lỗi.
 
@@ -129,4 +129,10 @@ Toàn bộ endpoint Task yêu cầu Bearer access token. Quyền được xác �
 | Thành viên `VIEWER` | Có | Không |
 | Người không thuộc Workspace | Không | Không |
 
-Thiếu hoặc sai access token trả 401; không đủ quyền trả 403; Project hoặc Task không tồn tại trả 404. Quyền được đọc từ database ở mỗi request nên việc thay đổi thành viên có hiệu lực ngay. API quản lý Workspace/Project sẽ được triển khai sau; cần tạo Workspace, Project và thành viên trong database để thử API Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.
+Thiếu hoặc sai access token trả 401; không đủ quyền trả 403; Project hoặc Task không tồn tại trả 404. Quyền được đọc từ database ở mỗi request nên việc thay đổi thành viên có hiệu lực ngay. Cần có Workspace, Project và thành viên trong database để thử API Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.
+
+## Buổi 5 — Workspace CRUD (phần đầu)
+
+Người dùng đã đăng nhập có thể tạo Workspace qua `POST /api/v1/workspaces`; họ trở thành chủ sở hữu và được thêm vào `workspace_members` với vai trò `OWNER` trong cùng giao dịch. Chủ sở hữu hoặc người dùng `ADMIN` có thể xem, đổi tên và xóa Workspace qua `GET`, `PATCH`, `DELETE /api/v1/workspaces/{workspace_id}`. Tên được trim, không được rỗng và dài tối đa 200 ký tự. Thiếu token trả 401, không có quyền trả 403, Workspace không tồn tại trả 404. Xóa Workspace cũng xóa membership và Project con theo khóa ngoại cascade.
+
+Phần mời/xóa thành viên và API Project thuộc phần tiếp theo của Buổi 5.
