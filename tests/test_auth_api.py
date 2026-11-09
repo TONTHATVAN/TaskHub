@@ -15,8 +15,13 @@ from app.api.dependencies import (
 from app.application.passwords import verify_password
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.core.constants import JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER
+from app.core.messages import PASSWORD_TOO_LONG_MESSAGE
 from app.domain.user import User, UserRole
-from app.domain.user_repository import UserRepository
+from app.domain.user_repository import (
+    EmailAlreadyExistsError,
+    UserProfileChanges,
+    UserRepository,
+)
 from app.main import create_app
 
 
@@ -42,6 +47,22 @@ class MemoryUserRepository:
         )
         self.users[email] = user
         return user
+
+    async def update_profile(self, user_id: UUID, changes: UserProfileChanges) -> User:
+        user = await self.get_by_id(user_id)
+        assert user is not None
+        email = changes.get("email", user.email)
+        if email != user.email and email in self.users:
+            raise EmailAlreadyExistsError
+        del self.users[user.email]
+        updated = replace(user, **changes)
+        self.users[email] = updated
+        return updated
+
+    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+        user = await self.get_by_id(user_id)
+        assert user is not None
+        self.users[user.email] = replace(user, hashed_password=hashed_password)
 
 
 class MemoryRefreshTokenRepository:
@@ -92,6 +113,7 @@ def test_register_hashes_password_and_rejects_duplicate() -> None:
             },
         )
         assert duplicate.status_code == 409
+        assert duplicate.json() == {"detail": "Email already registered"}
 
 
 def test_register_validates_password_and_email() -> None:
@@ -101,6 +123,7 @@ def test_register_validates_password_and_email() -> None:
     with TestClient(app) as client:
         for email, password in [
             ("invalid", "secure-pass-123"),
+            (f"{'a' * 310}@example.com", "secure-pass-123"),
             ("user@example.com", "short"),
             ("user@example.com", "a" * 73),
             ("user@example.com", "đ" * 40),
@@ -108,6 +131,19 @@ def test_register_validates_password_and_email() -> None:
             response = client.post(
                 "/api/v1/auth/register",
                 json={"email": email, "full_name": "User", "password": password},
+            )
+            assert response.status_code == 422
+            if password in ("a" * 73, "đ" * 40):
+                assert PASSWORD_TOO_LONG_MESSAGE in response.json()["detail"][0]["msg"]
+
+        for full_name in ("  ", "x" * 201, 123):
+            response = client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "user@example.com",
+                    "full_name": full_name,
+                    "password": "secure-pass-123",
+                },
             )
             assert response.status_code == 422
 

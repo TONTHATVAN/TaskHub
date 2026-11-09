@@ -23,6 +23,8 @@ PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang đư
 
 Yêu cầu thực tập được tổng hợp trong [`docs/TASKHUB_CONG_VIEC.md`](docs/TASKHUB_CONG_VIEC.md).
 
+Quy trình nhánh, Pull Request và định dạng mã nguồn: [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md).
+
 ## Buổi 1 — Core Setup & Architecture
 
 Mã ứng dụng nằm trong `app/`:
@@ -64,7 +66,7 @@ Mở `http://127.0.0.1:8000/docs` để thử API. Endpoint kiểm tra ứng d�
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. API tạo workspace và project sẽ được triển khai cùng phân quyền ở các buổi tiếp theo; hiện tại cần tạo các bản ghi này trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
+Task được lưu trong database và tồn tại qua các lần khởi động ứng dụng. `POST /api/v1/projects/{project_id}/tasks` chỉ chấp nhận project đã tồn tại và trả về 404 nếu không tìm thấy. `GET /api/v1/projects/{project_id}/tasks` hỗ trợ `page` từ 1 và `limit` từ 1 đến 100, mặc định là 20. API tạo workspace và project sẽ được triển khai ở các buổi tiếp theo; hiện tại cần tạo các bản ghi này trong database để thử API Task. Redis chưa được tích hợp vào ứng dụng.
 
 `BaseRepository[T]` cung cấp thêm, lấy, liệt kê có phân trang, cập nhật và xóa model. `SqlTaskRepository` chuyển giữa model SQLAlchemy và entity Task trong domain. Mỗi request sử dụng một `AsyncSession`; giao dịch được commit khi xử lý thành công và rollback nếu có lỗi.
 
@@ -112,3 +114,19 @@ Sau khi cập nhật mã, chạy migration mới:
 ```powershell
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
+
+## Buổi 4 — quản lý hồ sơ và phân quyền Task
+
+Người dùng đã đăng nhập có thể cập nhật email và tên qua `PATCH /api/v1/users/me`, hoặc đổi mật khẩu qua `POST /api/v1/users/me/change-password` với `current_password` và `new_password`. Các endpoint này yêu cầu Bearer access token. Email được chuẩn hóa về chữ thường; email trùng trả 409, mật khẩu hiện tại sai trả 400. Mật khẩu mới phải có ít nhất 8 ký tự và tối đa 72 byte UTF-8. Đổi mật khẩu thành công trả 204; access token hiện có tiếp tục hiệu lực đến khi hết hạn.
+
+Toàn bộ endpoint Task yêu cầu Bearer access token. Quyền được xác định theo Workspace chứa Project:
+
+| Vai trò | Đọc Task | Tạo, sửa, xóa Task |
+|---|---|---|
+| `ADMIN` | Có | Có |
+| Chủ sở hữu Workspace | Có | Có |
+| Thành viên `OWNER` hoặc `EDITOR` | Có | Có |
+| Thành viên `VIEWER` | Có | Không |
+| Người không thuộc Workspace | Không | Không |
+
+Thiếu hoặc sai access token trả 401; không đủ quyền trả 403; Project hoặc Task không tồn tại trả 404. Quyền được đọc từ database ở mỗi request nên việc thay đổi thành viên có hiệu lực ngay. API quản lý Workspace/Project sẽ được triển khai sau; cần tạo Workspace, Project và thành viên trong database để thử API Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.

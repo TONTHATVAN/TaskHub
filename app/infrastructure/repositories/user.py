@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.exceptions import UserNotFoundError
 from app.domain.user import User
-from app.domain.user_repository import EmailAlreadyExistsError
+from app.domain.user_repository import EmailAlreadyExistsError, UserProfileChanges
 from app.infrastructure.models import UserModel
 from app.infrastructure.repositories.base import BaseRepository
 
@@ -46,3 +47,29 @@ class SqlUserRepository:
         except IntegrityError as exc:
             raise EmailAlreadyExistsError from exc
         return self._to_domain(model)
+
+    async def update_profile(self, user_id: UUID, changes: UserProfileChanges) -> User:
+        try:
+            result = await self._session.execute(
+                update(UserModel)
+                .where(UserModel.id == user_id)
+                .values(**changes)
+                .returning(UserModel)
+                .execution_options(populate_existing=True)
+            )
+        except IntegrityError as exc:
+            raise EmailAlreadyExistsError from exc
+        model = result.scalar_one_or_none()
+        if model is None:
+            raise UserNotFoundError
+        return self._to_domain(model)
+
+    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+        result = await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(hashed_password=hashed_password)
+            .returning(UserModel.id)
+        )
+        if result.scalar_one_or_none() is None:
+            raise UserNotFoundError

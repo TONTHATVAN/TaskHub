@@ -6,14 +6,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import UnauthorizedException
 from app.application.auth_service import AuthService
+from app.application.profile_service import ProfileService
 from app.application.session_service import SessionService
+from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
+from app.domain.authorization import ProjectAccessRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
 from app.infrastructure.database import get_session
+from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
 from app.infrastructure.repositories.user import SqlUserRepository
@@ -35,6 +39,24 @@ def get_task_service(
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 
 
+async def get_project_access_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> ProjectAccessRepository:
+    return SqlProjectAccessRepository(session)
+
+
+def get_task_authorization_service(
+    access: Annotated[ProjectAccessRepository, Depends(get_project_access_repository)],
+    tasks: Annotated[TaskRepository, Depends(get_task_repository)],
+) -> TaskAuthorizationService:
+    return TaskAuthorizationService(access, tasks)
+
+
+TaskAuthorizationDep = Annotated[
+    TaskAuthorizationService, Depends(get_task_authorization_service)
+]
+
+
 async def get_user_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> UserRepository:
@@ -48,6 +70,15 @@ def get_auth_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_profile_service(
+    repository: Annotated[UserRepository, Depends(get_user_repository)],
+) -> ProfileService:
+    return ProfileService(repository)
+
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 
 
 async def get_refresh_token_repository(

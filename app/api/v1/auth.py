@@ -1,7 +1,11 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Response, status
 
 from app.api.dependencies import AuthServiceDep, SessionServiceDep
-from app.api.exceptions import InvalidRefreshTokenException, UnauthorizedException
+from app.api.exceptions import (
+    EmailAlreadyRegisteredException,
+    InvalidRefreshTokenException,
+    UnauthorizedException,
+)
 from app.api.v1.auth_schemas import (
     LoginRequest,
     RefreshRequest,
@@ -12,7 +16,6 @@ from app.api.v1.auth_schemas import (
 from app.application.session_service import InvalidCredentialsError
 from app.application.tokens import InvalidTokenError, TokenPair
 from app.core.messages import (
-    EMAIL_ALREADY_REGISTERED_MESSAGE,
     INVALID_CREDENTIALS_MESSAGE,
 )
 from app.domain.user import User
@@ -28,9 +31,7 @@ async def register(payload: RegisterRequest, service: AuthServiceDep) -> User:
             payload.email, payload.full_name, payload.password
         )
     except EmailAlreadyExistsError as exc:
-        raise HTTPException(
-            status_code=409, detail=EMAIL_ALREADY_REGISTERED_MESSAGE
-        ) from exc
+        raise EmailAlreadyRegisteredException() from exc
 
 
 @router.post("/login", response_model=TokenPairRead)

@@ -1,4 +1,15 @@
-from app.core.messages import PROJECT_NOT_FOUND_MESSAGE, TASK_NOT_FOUND_MESSAGE
+from app.core.messages import (
+    ACCESS_DENIED_MESSAGE,
+    PROJECT_NOT_FOUND_MESSAGE,
+    TASK_NOT_FOUND_MESSAGE,
+    USER_NOT_FOUND_MESSAGE,
+)
+
+
+class AccessDeniedError(Exception):
+    def __init__(self) -> None:
+        self.message = ACCESS_DENIED_MESSAGE
+        super().__init__(self.message)
 
 
 class NotFoundError(Exception):
@@ -17,3 +28,8 @@ class ProjectNotFoundError(NotFoundError):
 class TaskNotFoundError(NotFoundError):
     def __init__(self) -> None:
         super().__init__(TASK_NOT_FOUND_MESSAGE)
+
+
+class UserNotFoundError(NotFoundError):
+    def __init__(self) -> None:
+        super().__init__(USER_NOT_FOUND_MESSAGE)

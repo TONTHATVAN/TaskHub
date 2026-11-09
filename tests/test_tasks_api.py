@@ -1,10 +1,16 @@
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_task_repository
+from app.api.dependencies import (
+    get_current_user,
+    get_task_authorization_service,
+    get_task_repository,
+)
 from app.domain.exceptions import NotFoundError
+from app.domain.user import User, UserRole
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
 from app.main import create_app
 
@@ -13,7 +19,27 @@ def create_test_app() -> FastAPI:
     app = create_app()
     repository = InMemoryTaskRepository()
     app.dependency_overrides[get_task_repository] = lambda: repository
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=uuid4(),
+        email="test@example.com",
+        full_name="Test",
+        hashed_password="disabled",
+        role=UserRole.ADMIN,
+        is_active=True,
+        created_at=datetime.now(UTC),
+    )
+    app.dependency_overrides[get_task_authorization_service] = AllowTaskAccess
     return app
+
+
+class AllowTaskAccess:
+    async def require_project(
+        self, user: User, project_id: UUID, *, write: bool
+    ) -> None:
+        pass
+
+    async def require_task(self, user: User, task_id: UUID, *, write: bool) -> None:
+        pass
 
 
 def test_task_crud_flow() -> None:

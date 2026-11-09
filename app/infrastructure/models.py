@@ -15,19 +15,18 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.core.constants import TASK_TITLE_MAX_LENGTH
+from app.core.constants import (
+    TASK_TITLE_MAX_LENGTH,
+    USER_EMAIL_MAX_LENGTH,
+    USER_FULL_NAME_MAX_LENGTH,
+)
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.user import UserRole
+from app.domain.workspace import WorkspaceRole
 
 
 class Base(DeclarativeBase):
     pass
-
-
-class WorkspaceRole(StrEnum):
-    OWNER = "OWNER"
-    EDITOR = "EDITOR"
-    VIEWER = "VIEWER"
 
 
 class ProjectStatus(StrEnum):
@@ -41,8 +40,10 @@ class UserModel(Base):
     id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid4
     )
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    full_name: Mapped[str] = mapped_column(String(200))
+    email: Mapped[str] = mapped_column(
+        String(USER_EMAIL_MAX_LENGTH), unique=True, index=True
+    )
+    full_name: Mapped[str] = mapped_column(String(USER_FULL_NAME_MAX_LENGTH))
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(
         Enum(

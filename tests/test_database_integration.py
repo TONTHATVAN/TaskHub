@@ -6,8 +6,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
-from app.domain.exceptions import NotFoundError, TaskNotFoundError
+from app.api.dependencies import get_current_user
+from app.application.tokens import JwtTokenService
+from app.domain.exceptions import NotFoundError, TaskNotFoundError, UserNotFoundError
 from app.domain.task import TaskPriority, TaskStatus
+from app.domain.user import User, UserRole
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
     ProjectModel,
@@ -19,6 +22,8 @@ from app.infrastructure.models import (
 )
 from app.infrastructure.repositories.base import BaseRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
+from app.infrastructure.repositories.user import SqlUserRepository
+from app.infrastructure.settings import settings
 from app.main import create_app
 
 
@@ -44,6 +49,195 @@ def test_postgres_auth_token_rotation() -> None:
 )
 def test_postgres_stale_base_save() -> None:
     asyncio.run(_exercise_stale_base_save())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_profile_update_preserves_other_fields() -> None:
+    asyncio.run(_exercise_profile_update())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_task_permissions() -> None:
+    asyncio.run(_exercise_task_permissions())
+
+
+async def _exercise_task_permissions() -> None:
+    project_id = uuid4()
+    workspace_id = uuid4()
+    role_names = ("owner", "editor", "viewer", "outsider", "admin")
+    users = {
+        name: UserModel(
+            id=uuid4(),
+            email=f"{name}-{uuid4()}@example.invalid",
+            full_name=name,
+            hashed_password="disabled",
+            role=UserRole.ADMIN if name == "admin" else UserRole.MEMBER,
+        )
+        for name in role_names
+    }
+    try:
+        async with session_factory() as session:
+            workspace = WorkspaceModel(
+                id=workspace_id, name="Permissions", owner=users["owner"]
+            )
+            workspace.members.extend(
+                (
+                    WorkspaceMemberModel(
+                        user=users["editor"], role=WorkspaceRole.EDITOR
+                    ),
+                    WorkspaceMemberModel(
+                        user=users["viewer"], role=WorkspaceRole.VIEWER
+                    ),
+                )
+            )
+            session.add_all(users.values())
+            session.add(
+                ProjectModel(id=project_id, name="Permissions", workspace=workspace)
+            )
+            await session.commit()
+
+        tokens = JwtTokenService(
+            settings.jwt_secret_key.get_secret_value(),
+            settings.jwt_access_minutes,
+            settings.jwt_refresh_days,
+        )
+
+        def headers(name: str) -> dict[str, str]:
+            return {"Authorization": f"Bearer {tokens.issue_access(users[name].id)}"}
+
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            endpoint = f"/api/v1/projects/{project_id}/tasks"
+            assert (await client.get(endpoint)).status_code == 401
+            created = await client.post(
+                endpoint, json={"title": "Protected"}, headers=headers("owner")
+            )
+            assert created.status_code == 201
+            task_endpoint = f"/api/v1/tasks/{created.json()['id']}"
+
+            assert (
+                await client.get(endpoint, headers=headers("viewer"))
+            ).status_code == 200
+            assert (
+                await client.get(task_endpoint, headers=headers("viewer"))
+            ).status_code == 200
+            for response in (
+                await client.post(
+                    endpoint, json={"title": "Denied"}, headers=headers("viewer")
+                ),
+                await client.patch(
+                    task_endpoint,
+                    json={"title": "Denied"},
+                    headers=headers("viewer"),
+                ),
+                await client.delete(task_endpoint, headers=headers("viewer")),
+                await client.get(endpoint, headers=headers("outsider")),
+                await client.get(task_endpoint, headers=headers("outsider")),
+            ):
+                assert response.status_code == 403
+            assert (await client.get(task_endpoint, headers=headers("owner"))).json()[
+                "title"
+            ] == "Protected"
+
+            assert (
+                await client.patch(
+                    task_endpoint,
+                    json={"title": "Edited"},
+                    headers=headers("editor"),
+                )
+            ).status_code == 200
+            assert (
+                await client.post(
+                    endpoint, json={"title": "Second"}, headers=headers("editor")
+                )
+            ).status_code == 201
+            async with session_factory() as session:
+                await session.execute(
+                    delete(WorkspaceMemberModel).where(
+                        WorkspaceMemberModel.workspace_id == workspace_id,
+                        WorkspaceMemberModel.user_id == users["editor"].id,
+                    )
+                )
+                await session.commit()
+            assert (
+                await client.patch(
+                    task_endpoint,
+                    json={"title": "After removal"},
+                    headers=headers("editor"),
+                )
+            ).status_code == 403
+            assert (
+                await client.delete(task_endpoint, headers=headers("admin"))
+            ).status_code == 204
+    finally:
+        async with session_factory() as session:
+            await session.execute(
+                delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id)
+            )
+            await session.execute(
+                delete(UserModel).where(
+                    UserModel.id.in_([user.id for user in users.values()])
+                )
+            )
+            await session.commit()
+        await engine.dispose()
+
+
+async def _exercise_profile_update() -> None:
+    user_id = uuid4()
+    async with session_factory() as session:
+        await BaseRepository(session, UserModel).add(
+            UserModel(
+                id=user_id,
+                email=f"profile-{user_id}@example.invalid",
+                full_name="Original",
+                hashed_password="disabled",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as stale_session:
+            users = SqlUserRepository(stale_session)
+            old = await users.get_by_id(user_id)
+            assert old is not None
+            async with session_factory() as other_session:
+                other_users = SqlUserRepository(other_session)
+                await other_users.update_profile(user_id, {"full_name": "New Name"})
+                await other_session.commit()
+
+            updated = await users.update_profile(
+                user_id, {"email": f"new-{user_id}@example.invalid"}
+            )
+            assert updated.full_name == "New Name"
+            await stale_session.commit()
+
+        async with session_factory() as session:
+            stored = await SqlUserRepository(session).get_by_id(user_id)
+            assert stored is not None
+            assert stored.full_name == "New Name"
+            assert stored.email == f"new-{user_id}@example.invalid"
+            await BaseRepository(session, UserModel).delete(user_id)
+            await session.commit()
+
+        async with session_factory() as session:
+            users = SqlUserRepository(session)
+            with pytest.raises(UserNotFoundError):
+                await users.update_profile(user_id, {"full_name": "Missing"})
+            with pytest.raises(UserNotFoundError):
+                await users.update_password(user_id, "unused")
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+        await engine.dispose()
 
 
 async def _exercise_stale_base_save() -> None:
@@ -80,6 +274,8 @@ async def _exercise_stale_base_save() -> None:
 
 async def _exercise_auth() -> None:
     email = f"auth-{uuid4()}@example.com"
+    updated_email = f"updated-{uuid4()}@example.com"
+    other_email = f"other-{uuid4()}@example.com"
     try:
         async with AsyncClient(
             transport=ASGITransport(app=create_app()), base_url="http://test"
@@ -128,6 +324,67 @@ async def _exercise_auth() -> None:
             assert me.status_code == 200
             assert me.json()["email"] == email
 
+            headers = {"Authorization": f"Bearer {pair['access_token']}"}
+            assert (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": other_email,
+                        "full_name": "Other User",
+                        "password": "secret-pass-123",
+                    },
+                )
+            ).status_code == 201
+            assert (
+                await client.patch(
+                    "/api/v1/users/me",
+                    json={"email": other_email},
+                    headers=headers,
+                )
+            ).status_code == 409
+            assert (await client.get("/api/v1/users/me", headers=headers)).json()[
+                "email"
+            ] == email
+            updated = await client.patch(
+                "/api/v1/users/me",
+                json={"email": updated_email.upper(), "full_name": "Updated Profile"},
+                headers=headers,
+            )
+            assert updated.status_code == 200
+            assert updated.json()["email"] == updated_email
+            assert updated.json()["full_name"] == "Updated Profile"
+            assert (
+                await client.post(
+                    "/api/v1/users/me/change-password",
+                    json={
+                        "current_password": "wrong-password",
+                        "new_password": "new-secret-pass-123",
+                    },
+                    headers=headers,
+                )
+            ).status_code == 400
+            changed = await client.post(
+                "/api/v1/users/me/change-password",
+                json={
+                    "current_password": "secret-pass-123",
+                    "new_password": "new-secret-pass-123",
+                },
+                headers=headers,
+            )
+            assert changed.status_code == 204
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": updated_email, "password": "secret-pass-123"},
+                )
+            ).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": updated_email, "password": "new-secret-pass-123"},
+                )
+            ).status_code == 200
+
             refreshed = await client.post(
                 "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
             )
@@ -156,11 +413,15 @@ async def _exercise_auth() -> None:
                 select(RefreshTokenModel).where(RefreshTokenModel.user_id == user_id)
             )
             stored_tokens = list(tokens)
-            assert len(stored_tokens) == 2
-            assert all(token.revoked_at is not None for token in stored_tokens)
+            assert len(stored_tokens) == 3
+            assert sum(token.revoked_at is not None for token in stored_tokens) == 2
     finally:
         async with session_factory() as session:
-            await session.execute(delete(UserModel).where(UserModel.email == email))
+            await session.execute(
+                delete(UserModel).where(
+                    UserModel.email.in_((email, updated_email, other_email))
+                )
+            )
             await session.commit()
         await engine.dispose()
 
@@ -189,8 +450,18 @@ async def _exercise_database() -> None:
             session.add(project)
             await session.commit()
 
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: User(
+            id=user_id,
+            email=user.email,
+            full_name=user.full_name,
+            hashed_password=user.hashed_password,
+            role=UserRole.MEMBER,
+            is_active=True,
+            created_at=user.created_at,
+        )
         async with AsyncClient(
-            transport=ASGITransport(app=create_app()), base_url="http://test"
+            transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             missing_project = await client.post(
                 f"/api/v1/projects/{uuid4()}/tasks", json={"title": "Missing project"}
@@ -223,7 +494,7 @@ async def _exercise_database() -> None:
             assert stale_task is not None
 
         async with AsyncClient(
-            transport=ASGITransport(app=create_app()), base_url="http://test"
+            transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             fetched = await client.get(f"/api/v1/tasks/{task_id}")
             assert fetched.status_code == 200

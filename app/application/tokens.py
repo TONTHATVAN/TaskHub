@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 import jwt
 
-from app.core.constants import JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER
+from app.core.constants import BEARER_SCHEME, JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER
 
 
 class InvalidTokenError(Exception):
@@ -28,7 +28,7 @@ class TokenClaims:
 class TokenPair:
     access_token: str
     refresh_token: str
-    token_type: str = "bearer"
+    token_type: str = BEARER_SCHEME.lower()
 
 
 class JwtTokenService:
