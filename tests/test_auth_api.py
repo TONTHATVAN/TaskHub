@@ -113,6 +113,7 @@ def test_register_hashes_password_and_rejects_duplicate() -> None:
             },
         )
         assert duplicate.status_code == 409
+        assert duplicate.json() == {"detail": "Email already registered"}
 
 
 def test_register_validates_password_and_email() -> None:

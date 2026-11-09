@@ -22,16 +22,11 @@ from app.core.constants import (
 )
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.user import UserRole
+from app.domain.workspace import WorkspaceRole
 
 
 class Base(DeclarativeBase):
     pass
-
-
-class WorkspaceRole(StrEnum):
-    OWNER = "OWNER"
-    EDITOR = "EDITOR"
-    VIEWER = "VIEWER"
 
 
 class ProjectStatus(StrEnum):

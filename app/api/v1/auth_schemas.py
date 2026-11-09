@@ -9,6 +9,7 @@ from app.core.constants import (
     PASSWORD_MIN_LENGTH,
     USER_EMAIL_MAX_LENGTH,
     USER_FULL_NAME_MAX_LENGTH,
+    USER_FULL_NAME_MIN_LENGTH,
 )
 from app.core.messages import (
     FULL_NAME_EMPTY_MESSAGE,
@@ -38,7 +39,9 @@ def normalize_full_name(value: object) -> object:
 
 class RegisterRequest(BaseModel):
     email: EmailStr = Field(max_length=USER_EMAIL_MAX_LENGTH)
-    full_name: str = Field(min_length=1, max_length=USER_FULL_NAME_MAX_LENGTH)
+    full_name: str = Field(
+        min_length=USER_FULL_NAME_MIN_LENGTH, max_length=USER_FULL_NAME_MAX_LENGTH
+    )
     password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_BYTES)
 
     @field_validator("email")
@@ -69,7 +72,9 @@ class UserRead(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     email: EmailStr | None = Field(default=None, max_length=USER_EMAIL_MAX_LENGTH)
     full_name: str | None = Field(
-        default=None, min_length=1, max_length=USER_FULL_NAME_MAX_LENGTH
+        default=None,
+        min_length=USER_FULL_NAME_MIN_LENGTH,
+        max_length=USER_FULL_NAME_MAX_LENGTH,
     )
 
     @field_validator("email", mode="before")

@@ -79,6 +79,7 @@ def test_profile_update_and_password_change() -> None:
             headers=headers,
         )
         assert duplicate.status_code == 409
+        assert duplicate.json() == {"detail": "Email already registered"}
         assert (
             client.get("/api/v1/users/me", headers=headers).json()["email"]
             == "first@example.com"
@@ -135,14 +136,13 @@ def test_profile_update_and_password_change() -> None:
             ).status_code
             == 422
         )
-        assert (
-            client.post(
-                endpoint,
-                json={"current_password": "wrong", "new_password": "new-password"},
-                headers=headers,
-            ).status_code
-            == 400
+        wrong_current = client.post(
+            endpoint,
+            json={"current_password": "wrong", "new_password": "new-password"},
+            headers=headers,
         )
+        assert wrong_current.status_code == 400
+        assert wrong_current.json() == {"detail": "Current password is incorrect"}
         assert (
             client.post(
                 endpoint,
