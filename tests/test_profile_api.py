@@ -12,11 +12,10 @@ from app.main import create_app
 
 def test_profile_update_and_password_change() -> None:
     users = MemoryUserRepository()
+    refresh_tokens = MemoryRefreshTokenRepository()
     app = create_app()
     app.dependency_overrides[get_user_repository] = lambda: users
-    app.dependency_overrides[get_refresh_token_repository] = lambda: (
-        MemoryRefreshTokenRepository()
-    )
+    app.dependency_overrides[get_refresh_token_repository] = lambda: refresh_tokens
     app.dependency_overrides[get_token_service] = lambda: JwtTokenService(
         "test-secret" * 4, 15, 7
     )
@@ -161,6 +160,12 @@ def test_profile_update_and_password_change() -> None:
             ).status_code
             == 401
         )
+        revoked_refresh = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": login.json()["refresh_token"]},
+        )
+        assert revoked_refresh.status_code == 401
+        assert revoked_refresh.headers["WWW-Authenticate"] == "Bearer"
         assert (
             client.post(
                 "/api/v1/auth/login",

@@ -1,3 +1,6 @@
+from http import HTTPStatus
+
+from app.core.exceptions import AppException
 from app.core.messages import (
     ACCESS_DENIED_MESSAGE,
     PROJECT_NOT_FOUND_MESSAGE,
@@ -7,18 +10,16 @@ from app.core.messages import (
 )
 
 
-class AccessDeniedError(Exception):
+class AccessDeniedError(AppException):
     def __init__(self) -> None:
-        self.message = ACCESS_DENIED_MESSAGE
-        super().__init__(self.message)
+        super().__init__(ACCESS_DENIED_MESSAGE, HTTPStatus.FORBIDDEN)
 
 
-class NotFoundError(Exception):
+class NotFoundError(AppException):
     """A requested domain resource does not exist."""
 
     def __init__(self, message: str) -> None:
-        self.message = message
-        super().__init__(message)
+        super().__init__(message, HTTPStatus.NOT_FOUND)
 
 
 class ProjectNotFoundError(NotFoundError):

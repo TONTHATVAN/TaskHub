@@ -36,6 +36,8 @@ class MemoryUserRepository:
         return next((user for user in self.users.values() if user.id == user_id), None)
 
     async def add(self, email: str, full_name: str, hashed_password: str) -> User:
+        if email in self.users:
+            raise EmailAlreadyExistsError
         user = User(
             id=uuid4(),
             email=email,
@@ -79,6 +81,11 @@ class MemoryRefreshTokenRepository:
         del self.tokens[token_id]
         return True
 
+    async def revoke_all(self, user_id: UUID, now: datetime) -> None:
+        for token_id, (stored_user_id, _) in list(self.tokens.items()):
+            if stored_user_id == user_id:
+                del self.tokens[token_id]
+
 
 def test_register_hashes_password_and_rejects_duplicate() -> None:
     repository = MemoryUserRepository()
@@ -121,6 +128,16 @@ def test_register_validates_password_and_email() -> None:
     app.dependency_overrides[get_user_repository] = lambda: MemoryUserRepository()
 
     with TestClient(app) as client:
+        role_override = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "user@example.com",
+                "full_name": "User",
+                "password": "secure-pass-123",
+                "role": "ADMIN",
+            },
+        )
+        assert role_override.status_code == 422
         for email, password in [
             ("invalid", "secure-pass-123"),
             (f"{'a' * 310}@example.com", "secure-pass-123"),
@@ -192,6 +209,14 @@ def test_token_types_and_jwt_settings() -> None:
         issuer=JWT_ISSUER,
     )
     assert payload["type"] == TokenType.ACCESS
+    assert "iat" in payload
+    malformed_subject = jwt.encode(
+        {**payload, "sub": "not-a-uuid"},
+        "test-secret" * 4,
+        algorithm=JWT_ALGORITHM,
+    )
+    with pytest.raises(InvalidTokenError):
+        tokens.decode(malformed_subject, TokenType.ACCESS)
 
 
 def test_login_refresh_logout_and_profile() -> None:
@@ -307,13 +332,19 @@ def test_login_refresh_logout_and_profile() -> None:
         users.users["user@example.com"] = replace(
             users.users["user@example.com"], is_active=False
         )
-        assert (
-            client.get(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {new_pair['access_token']}"},
-            ).status_code
-            == 401
+        inactive_access = client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {new_pair['access_token']}"},
         )
+        assert inactive_access.status_code == 401
+        assert inactive_access.json() == {"detail": "Inactive user"}
+        assert inactive_access.headers["WWW-Authenticate"] == "Bearer"
+        inactive_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "secret-pass"},
+        )
+        assert inactive_login.status_code == 401
+        assert inactive_login.json() == {"detail": "Inactive user"}
 
 
 def test_expired_access_token_is_rejected() -> None:

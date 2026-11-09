@@ -1,6 +1,8 @@
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.messages import JWT_SECRET_KEY_EXAMPLE_MESSAGE
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -14,7 +16,7 @@ class Settings(BaseSettings):
     @classmethod
     def reject_example_secret(cls, value: SecretStr) -> SecretStr:
         if value.get_secret_value().startswith("replace-with-"):
-            raise ValueError("JWT_SECRET_KEY must be replaced with a random secret")
+            raise ValueError(JWT_SECRET_KEY_EXAMPLE_MESSAGE)
         return value
 
 

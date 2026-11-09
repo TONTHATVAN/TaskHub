@@ -30,3 +30,13 @@ class SqlRefreshTokenRepository:
             .returning(RefreshTokenModel.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def revoke_all(self, user_id: UUID, now: datetime) -> None:
+        await self._session.execute(
+            update(RefreshTokenModel)
+            .where(
+                RefreshTokenModel.user_id == user_id,
+                RefreshTokenModel.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )

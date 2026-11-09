@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.constants import (
     PASSWORD_MAX_BYTES,
@@ -38,6 +38,8 @@ def normalize_full_name(value: object) -> object:
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: EmailStr = Field(max_length=USER_EMAIL_MAX_LENGTH)
     full_name: str = Field(
         min_length=USER_FULL_NAME_MIN_LENGTH, max_length=USER_FULL_NAME_MAX_LENGTH

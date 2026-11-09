@@ -372,27 +372,33 @@ async def _exercise_auth() -> None:
                 headers=headers,
             )
             assert changed.status_code == 204
+            revoked_after_password_change = await client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": pair["refresh_token"]},
+            )
+            assert revoked_after_password_change.status_code == 401
+            assert revoked_after_password_change.headers["WWW-Authenticate"] == "Bearer"
             assert (
                 await client.post(
                     "/api/v1/auth/login",
                     json={"email": updated_email, "password": "secret-pass-123"},
                 )
             ).status_code == 401
-            assert (
-                await client.post(
-                    "/api/v1/auth/login",
-                    json={"email": updated_email, "password": "new-secret-pass-123"},
-                )
-            ).status_code == 200
+            new_login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": updated_email, "password": "new-secret-pass-123"},
+            )
+            assert new_login.status_code == 200
 
             refreshed = await client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
+                "/api/v1/auth/refresh",
+                json={"refresh_token": new_login.json()["refresh_token"]},
             )
             assert refreshed.status_code == 200
             assert (
                 await client.post(
                     "/api/v1/auth/refresh",
-                    json={"refresh_token": pair["refresh_token"]},
+                    json={"refresh_token": new_login.json()["refresh_token"]},
                 )
             ).status_code == 401
 
@@ -414,7 +420,7 @@ async def _exercise_auth() -> None:
             )
             stored_tokens = list(tokens)
             assert len(stored_tokens) == 3
-            assert sum(token.revoked_at is not None for token in stored_tokens) == 2
+            assert all(token.revoked_at is not None for token in stored_tokens)
     finally:
         async with session_factory() as session:
             await session.execute(

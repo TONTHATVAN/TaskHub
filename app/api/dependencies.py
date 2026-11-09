@@ -4,7 +4,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.exceptions import UnauthorizedException
+from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
 from app.application.profile_service import ProfileService
 from app.application.session_service import SessionService
@@ -90,19 +90,22 @@ def get_auth_service(
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
-def get_profile_service(
-    repository: Annotated[UserRepository, Depends(get_user_repository)],
-) -> ProfileService:
-    return ProfileService(repository)
-
-
-ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
-
-
 async def get_refresh_token_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> RefreshTokenRepository:
     return SqlRefreshTokenRepository(session)
+
+
+def get_profile_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    refresh_tokens: Annotated[
+        RefreshTokenRepository, Depends(get_refresh_token_repository)
+    ],
+) -> ProfileService:
+    return ProfileService(users, refresh_tokens)
+
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 
 
 def get_token_service() -> JwtTokenService:
@@ -140,8 +143,10 @@ async def get_current_user(
     except InvalidTokenError as exc:
         raise UnauthorizedException() from exc
     user = await users.get_by_id(claims.user_id)
-    if user is None or not user.is_active:
+    if user is None:
         raise UnauthorizedException()
+    if not user.is_active:
+        raise InactiveUserException()
     return user
 
 

@@ -1,4 +1,7 @@
+from datetime import UTC, datetime
+
 from app.application.passwords import hash_password, verify_password
+from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.user import User
 from app.domain.user_repository import UserProfileChanges, UserRepository
 
@@ -8,8 +11,11 @@ class IncorrectPasswordError(Exception):
 
 
 class ProfileService:
-    def __init__(self, users: UserRepository) -> None:
+    def __init__(
+        self, users: UserRepository, refresh_tokens: RefreshTokenRepository
+    ) -> None:
         self._users = users
+        self._refresh_tokens = refresh_tokens
 
     async def update(self, user: User, changes: UserProfileChanges) -> User:
         if not changes:
@@ -22,3 +28,4 @@ class ProfileService:
         if not await verify_password(current_password, user.hashed_password):
             raise IncorrectPasswordError
         await self._users.update_password(user.id, await hash_password(new_password))
+        await self._refresh_tokens.revoke_all(user.id, datetime.now(UTC))
