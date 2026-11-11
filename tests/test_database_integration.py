@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -8,8 +9,13 @@ from sqlalchemy import delete, select
 
 from app.api.dependencies import get_current_user
 from app.application.tokens import JwtTokenService
-from app.domain.exceptions import NotFoundError, TaskNotFoundError, UserNotFoundError
-from app.domain.task import TaskPriority, TaskStatus
+from app.domain.exceptions import (
+    NotFoundError,
+    ProjectNotFoundError,
+    TaskNotFoundError,
+    UserNotFoundError,
+)
+from app.domain.task import Task, TaskPriority, TaskStatus
 from app.domain.user import User, UserRole
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
@@ -21,6 +27,7 @@ from app.infrastructure.models import (
     WorkspaceRole,
 )
 from app.infrastructure.repositories.base import BaseRepository
+from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
 from app.infrastructure.repositories.user import SqlUserRepository
 from app.infrastructure.settings import settings
@@ -41,6 +48,59 @@ def test_postgres_task_crud_and_persistence() -> None:
 )
 def test_postgres_auth_token_rotation() -> None:
     asyncio.run(_exercise_auth())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_refresh_waits_for_password_change() -> None:
+    asyncio.run(_exercise_refresh_password_lock())
+
+
+async def _exercise_refresh_password_lock() -> None:
+    user_id = uuid4()
+    token_id = uuid4()
+    try:
+        async with session_factory() as session:
+            session.add(
+                UserModel(
+                    id=user_id,
+                    email=f"refresh-lock-{user_id}@example.invalid",
+                    full_name="Refresh Lock",
+                    hashed_password="old hash",
+                )
+            )
+            await session.flush()
+            await SqlRefreshTokenRepository(session).add(
+                token_id, user_id, datetime.now(UTC) + timedelta(days=1)
+            )
+            await session.commit()
+
+        async with session_factory() as changing_session:
+            await SqlUserRepository(changing_session).update_password(
+                user_id, "new hash"
+            )
+            async with session_factory() as refreshing_session:
+                waiting_user = asyncio.create_task(
+                    SqlUserRepository(refreshing_session).get_by_id_for_update(user_id)
+                )
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(waiting_user), timeout=0.1)
+
+                await SqlRefreshTokenRepository(changing_session).revoke_all(
+                    user_id, datetime.now(UTC)
+                )
+                await changing_session.commit()
+                assert await asyncio.wait_for(waiting_user, timeout=5) is not None
+                assert not await SqlRefreshTokenRepository(refreshing_session).consume(
+                    token_id, user_id, datetime.now(UTC)
+                )
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+        await engine.dispose()
 
 
 @pytest.mark.skipif(
@@ -473,6 +533,20 @@ async def _exercise_database() -> None:
                 f"/api/v1/projects/{uuid4()}/tasks", json={"title": "Missing project"}
             )
             assert missing_project.status_code == 404
+
+            async with session_factory() as session:
+                with pytest.raises(ProjectNotFoundError):
+                    await SqlTaskRepository(session).add(
+                        Task(
+                            id=uuid4(),
+                            project_id=uuid4(),
+                            title="Project deleted after authorization",
+                            description=None,
+                            status=TaskStatus.TODO,
+                            priority=TaskPriority.MEDIUM,
+                            created_at=datetime.now(UTC),
+                        )
+                    )
 
             created = await client.post(
                 f"/api/v1/projects/{project_id}/tasks", json={"title": "Persisted task"}

@@ -35,10 +35,10 @@ class SessionService:
         user = await self._users.get_by_email(email)
         if user is None:
             raise InvalidCredentialsError
-        if not user.is_active:
-            raise InactiveUserError
         if not await verify_password(password, user.hashed_password):
             raise InvalidCredentialsError
+        if not user.is_active:
+            raise InactiveUserError
         return await self._issue_pair(user.id)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
@@ -55,7 +55,7 @@ class SessionService:
         if claims.token_id is None:
             raise InvalidTokenError
         if require_active:
-            user = await self._users.get_by_id(claims.user_id)
+            user = await self._users.get_by_id_for_update(claims.user_id)
             if user is None:
                 raise InvalidTokenError
             if not user.is_active:

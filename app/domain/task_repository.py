@@ -13,8 +13,6 @@ class TaskChanges(TypedDict, total=False):
 
 
 class TaskRepository(Protocol):
-    async def project_exists(self, project_id: UUID) -> bool: ...
-
     async def add(self, task: Task) -> None: ...
 
     async def list_by_project(

@@ -1,10 +1,11 @@
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
-from app.domain.exceptions import TaskNotFoundError
+from app.domain.exceptions import ProjectNotFoundError, TaskNotFoundError
 from app.domain.task import Task
 from app.domain.task_repository import TaskChanges
 from app.infrastructure.models import ProjectModel, TaskModel
@@ -28,9 +29,6 @@ class SqlTaskRepository:
             created_at=model.created_at,
         )
 
-    async def project_exists(self, project_id: UUID) -> bool:
-        return await self._session.get(ProjectModel, project_id) is not None
-
     async def add(self, task: Task) -> None:
         model = TaskModel(
             id=task.id,
@@ -41,7 +39,13 @@ class SqlTaskRepository:
             priority=task.priority,
             created_at=task.created_at,
         )
-        await self._repository.add(model)
+        try:
+            async with self._session.begin_nested():
+                await self._repository.add(model)
+        except IntegrityError as exc:
+            if await self._session.get(ProjectModel, task.project_id) is None:
+                raise ProjectNotFoundError from exc
+            raise
 
     async def get(self, task_id: UUID) -> Task | None:
         model = await self._repository.get(task_id)

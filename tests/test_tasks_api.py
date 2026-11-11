@@ -9,7 +9,9 @@ from app.api.dependencies import (
     get_task_authorization_service,
     get_task_repository,
 )
-from app.domain.exceptions import NotFoundError
+from app.domain.authorization import ProjectAccess
+from app.domain.exceptions import NotFoundError, ProjectNotFoundError, TaskNotFoundError
+from app.domain.task import Task
 from app.domain.user import User, UserRole
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
 from app.main import create_app
@@ -28,18 +30,58 @@ def create_test_app() -> FastAPI:
         is_active=True,
         created_at=datetime.now(UTC),
     )
-    app.dependency_overrides[get_task_authorization_service] = AllowTaskAccess
+    app.dependency_overrides[get_task_authorization_service] = lambda: AllowTaskAccess(
+        repository
+    )
     return app
 
 
 class AllowTaskAccess:
+    def __init__(self, repository: InMemoryTaskRepository) -> None:
+        self.repository = repository
+
     async def require_project(
         self, user: User, project_id: UUID, *, write: bool
-    ) -> None:
-        pass
+    ) -> ProjectAccess:
+        return ProjectAccess(owner_id=user.id, member_role=None)
 
-    async def require_task(self, user: User, task_id: UUID, *, write: bool) -> None:
-        pass
+    async def require_task(self, user: User, task_id: UUID, *, write: bool) -> Task:
+        task = await self.repository.get(task_id)
+        if task is None:
+            raise TaskNotFoundError
+        return task
+
+
+def test_task_handlers_reuse_authorized_task() -> None:
+    class CountingTaskRepository(InMemoryTaskRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.get_calls = 0
+
+        async def get(self, task_id: UUID) -> Task | None:
+            self.get_calls += 1
+            return await super().get(task_id)
+
+    repository = CountingTaskRepository()
+    app = create_test_app()
+    app.dependency_overrides[get_task_repository] = lambda: repository
+    app.dependency_overrides[get_task_authorization_service] = lambda: AllowTaskAccess(
+        repository
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            f"/api/v1/projects/{uuid4()}/tasks", json={"title": "One lookup"}
+        )
+        assert created.status_code == 201
+        assert repository.get_calls == 0
+        endpoint = f"/api/v1/tasks/{created.json()['id']}"
+        assert client.get(endpoint).status_code == 200
+        assert repository.get_calls == 1
+        assert client.patch(endpoint, json={"title": "Updated"}).status_code == 200
+        assert repository.get_calls == 2
+        assert client.delete(endpoint).status_code == 204
+        assert repository.get_calls == 3
 
 
 def test_task_crud_flow() -> None:
@@ -183,11 +225,15 @@ def test_not_found_responses() -> None:
             assert response.status_code == 404
             assert response.json() == {"detail": "Task not found"}
 
-    class MissingProjectRepository(InMemoryTaskRepository):
-        async def project_exists(self, project_id: UUID) -> bool:
-            return False
+    class MissingProjectAccess(AllowTaskAccess):
+        async def require_project(
+            self, user: User, project_id: UUID, *, write: bool
+        ) -> ProjectAccess:
+            raise ProjectNotFoundError
 
-    app.dependency_overrides[get_task_repository] = MissingProjectRepository
+    app.dependency_overrides[get_task_authorization_service] = lambda: (
+        MissingProjectAccess(InMemoryTaskRepository())
+    )
     with TestClient(app) as client:
         response = client.post(
             f"/api/v1/projects/{uuid4()}/tasks", json={"title": "Task"}

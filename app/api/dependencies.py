@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -12,8 +13,9 @@ from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
-from app.domain.authorization import ProjectAccessRepository
+from app.domain.authorization import ProjectAccess, ProjectAccessRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
+from app.domain.task import Task
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
@@ -151,3 +153,33 @@ async def get_current_user(
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+async def get_readable_project(
+    project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> ProjectAccess:
+    return await authorization.require_project(user, project_id, write=False)
+
+
+async def get_writable_project(
+    project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> ProjectAccess:
+    return await authorization.require_project(user, project_id, write=True)
+
+
+async def get_readable_task(
+    task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> Task:
+    return await authorization.require_task(user, task_id, write=False)
+
+
+async def get_writable_task(
+    task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> Task:
+    return await authorization.require_task(user, task_id, write=True)
+
+
+ReadableProjectDep = Annotated[ProjectAccess, Depends(get_readable_project)]
+WritableProjectDep = Annotated[ProjectAccess, Depends(get_writable_project)]
+ReadableTaskDep = Annotated[Task, Depends(get_readable_task)]
+WritableTaskDep = Annotated[Task, Depends(get_writable_task)]

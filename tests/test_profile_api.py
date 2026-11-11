@@ -40,6 +40,13 @@ def test_profile_update_and_password_change() -> None:
         )
         assert login.status_code == 200
         headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        old_refresh_token = login.json()["refresh_token"]
+        second_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "first@example.com", "password": "old-password"},
+        )
+        assert second_login.status_code == 200
+        second_refresh_token = second_login.json()["refresh_token"]
 
         assert (
             client.patch("/api/v1/users/me", json={"full_name": "Guest"}).status_code
@@ -160,12 +167,12 @@ def test_profile_update_and_password_change() -> None:
             ).status_code
             == 401
         )
-        revoked_refresh = client.post(
-            "/api/v1/auth/refresh",
-            json={"refresh_token": login.json()["refresh_token"]},
-        )
-        assert revoked_refresh.status_code == 401
-        assert revoked_refresh.headers["WWW-Authenticate"] == "Bearer"
+        for refresh_token in (old_refresh_token, second_refresh_token):
+            revoked_refresh = client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            )
+            assert revoked_refresh.status_code == 401
+            assert revoked_refresh.headers["WWW-Authenticate"] == "Bearer"
         assert (
             client.post(
                 "/api/v1/auth/login",
