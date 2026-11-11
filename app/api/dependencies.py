@@ -1,18 +1,20 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.exceptions import UnauthorizedException
+from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
 from app.application.profile_service import ProfileService
 from app.application.session_service import SessionService
 from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
-from app.domain.authorization import ProjectAccessRepository
+from app.domain.authorization import ProjectAccess, ProjectAccessRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
+from app.domain.task import Task
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
@@ -72,19 +74,22 @@ def get_auth_service(
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
-def get_profile_service(
-    repository: Annotated[UserRepository, Depends(get_user_repository)],
-) -> ProfileService:
-    return ProfileService(repository)
-
-
-ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
-
-
 async def get_refresh_token_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> RefreshTokenRepository:
     return SqlRefreshTokenRepository(session)
+
+
+def get_profile_service(
+    repository: Annotated[UserRepository, Depends(get_user_repository)],
+    refresh_tokens: Annotated[
+        RefreshTokenRepository, Depends(get_refresh_token_repository)
+    ],
+) -> ProfileService:
+    return ProfileService(repository, refresh_tokens)
+
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 
 
 def get_token_service() -> JwtTokenService:
@@ -122,9 +127,41 @@ async def get_current_user(
     except InvalidTokenError as exc:
         raise UnauthorizedException() from exc
     user = await users.get_by_id(claims.user_id)
-    if user is None or not user.is_active:
+    if user is None:
         raise UnauthorizedException()
+    if not user.is_active:
+        raise InactiveUserException()
     return user
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+async def get_readable_project(
+    project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> ProjectAccess:
+    return await authorization.require_project(user, project_id, write=False)
+
+
+async def get_writable_project(
+    project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> ProjectAccess:
+    return await authorization.require_project(user, project_id, write=True)
+
+
+async def get_readable_task(
+    task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> Task:
+    return await authorization.require_task(user, task_id, write=False)
+
+
+async def get_writable_task(
+    task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> Task:
+    return await authorization.require_task(user, task_id, write=True)
+
+
+ReadableProjectDep = Annotated[ProjectAccess, Depends(get_readable_project)]
+WritableProjectDep = Annotated[ProjectAccess, Depends(get_writable_project)]
+ReadableTaskDep = Annotated[Task, Depends(get_readable_task)]
+WritableTaskDep = Annotated[Task, Depends(get_writable_task)]

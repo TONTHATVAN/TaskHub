@@ -9,9 +9,6 @@ class InMemoryTaskRepository:
     def __init__(self) -> None:
         self._tasks: dict[UUID, Task] = {}
 
-    async def project_exists(self, project_id: UUID) -> bool:
-        return True
-
     async def add(self, task: Task) -> None:
         self._tasks[task.id] = task
 

@@ -38,6 +38,12 @@ class SqlUserRepository:
         model = await self._repository.get(user_id)
         return self._to_domain(model) if model is not None else None
 
+    async def get_by_id_for_update(self, user_id: UUID) -> User | None:
+        model = await self._session.scalar(
+            select(UserModel).where(UserModel.id == user_id).with_for_update()
+        )
+        return self._to_domain(model) if model is not None else None
+
     async def add(self, email: str, full_name: str, hashed_password: str) -> User:
         model = UserModel(
             email=email, full_name=full_name, hashed_password=hashed_password

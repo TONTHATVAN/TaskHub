@@ -35,7 +35,12 @@ class MemoryUserRepository:
     async def get_by_id(self, user_id: UUID) -> User | None:
         return next((user for user in self.users.values() if user.id == user_id), None)
 
+    async def get_by_id_for_update(self, user_id: UUID) -> User | None:
+        return await self.get_by_id(user_id)
+
     async def add(self, email: str, full_name: str, hashed_password: str) -> User:
+        if email in self.users:
+            raise EmailAlreadyExistsError
         user = User(
             id=uuid4(),
             email=email,
@@ -78,6 +83,13 @@ class MemoryRefreshTokenRepository:
             return False
         del self.tokens[token_id]
         return True
+
+    async def revoke_all(self, user_id: UUID, now: datetime) -> None:
+        self.tokens = {
+            token_id: token
+            for token_id, token in self.tokens.items()
+            if token[0] != user_id
+        }
 
 
 def test_register_hashes_password_and_rejects_duplicate() -> None:
@@ -304,16 +316,37 @@ def test_login_refresh_logout_and_profile() -> None:
             ).status_code
             == 401
         )
+        active_session = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "secret-pass"},
+        )
+        assert active_session.status_code == 200
         users.users["user@example.com"] = replace(
             users.users["user@example.com"], is_active=False
         )
-        assert (
-            client.get(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {new_pair['access_token']}"},
-            ).status_code
-            == 401
+        inactive_access = client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {new_pair['access_token']}"},
         )
+        assert inactive_access.status_code == 401
+        assert inactive_access.json() == {"detail": "Inactive user"}
+        assert inactive_access.headers["WWW-Authenticate"] == "Bearer"
+        inactive_refresh = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": active_session.json()["refresh_token"]},
+        )
+        assert inactive_refresh.status_code == 401
+        assert inactive_refresh.json() == {"detail": "Inactive user"}
+        assert client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "wrong"},
+        ).json() == {"detail": "Invalid credentials"}
+        inactive_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "secret-pass"},
+        )
+        assert inactive_login.status_code == 401
+        assert inactive_login.json() == {"detail": "Inactive user"}
 
 
 def test_expired_access_token_is_rejected() -> None:

@@ -12,11 +12,10 @@ from app.main import create_app
 
 def test_profile_update_and_password_change() -> None:
     users = MemoryUserRepository()
+    refresh_tokens = MemoryRefreshTokenRepository()
     app = create_app()
     app.dependency_overrides[get_user_repository] = lambda: users
-    app.dependency_overrides[get_refresh_token_repository] = lambda: (
-        MemoryRefreshTokenRepository()
-    )
+    app.dependency_overrides[get_refresh_token_repository] = lambda: refresh_tokens
     app.dependency_overrides[get_token_service] = lambda: JwtTokenService(
         "test-secret" * 4, 15, 7
     )
@@ -41,6 +40,13 @@ def test_profile_update_and_password_change() -> None:
         )
         assert login.status_code == 200
         headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        old_refresh_token = login.json()["refresh_token"]
+        second_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "first@example.com", "password": "old-password"},
+        )
+        assert second_login.status_code == 200
+        second_refresh_token = second_login.json()["refresh_token"]
 
         assert (
             client.patch("/api/v1/users/me", json={"full_name": "Guest"}).status_code
@@ -161,6 +167,13 @@ def test_profile_update_and_password_change() -> None:
             ).status_code
             == 401
         )
+        for refresh_token in (old_refresh_token, second_refresh_token):
+            assert (
+                client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+                ).status_code
+                == 401
+            )
         assert (
             client.post(
                 "/api/v1/auth/login",

@@ -4,6 +4,7 @@ from app.core.constants import BEARER_SCHEME
 from app.core.messages import (
     CURRENT_PASSWORD_INCORRECT_MESSAGE,
     EMAIL_ALREADY_REGISTERED_MESSAGE,
+    INACTIVE_USER_MESSAGE,
     INVALID_ACCESS_TOKEN_MESSAGE,
     INVALID_REFRESH_TOKEN_MESSAGE,
 )
@@ -37,3 +38,8 @@ class UnauthorizedException(HTTPException):
 class InvalidRefreshTokenException(UnauthorizedException):
     def __init__(self) -> None:
         super().__init__(INVALID_REFRESH_TOKEN_MESSAGE)
+
+
+class InactiveUserException(UnauthorizedException):
+    def __init__(self) -> None:
+        super().__init__(INACTIVE_USER_MESSAGE)

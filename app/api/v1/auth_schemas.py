@@ -86,8 +86,8 @@ class ProfileUpdateRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: str | None) -> str | None:
-        return value.lower() if value is not None else None
+    def normalize_email(cls, value: str) -> str:
+        return value.lower()
 
     @field_validator("full_name", mode="before")
     @classmethod
