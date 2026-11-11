@@ -3,7 +3,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 
-from app.api.dependencies import CurrentUserDep, TaskAuthorizationDep, TaskServiceDep
+from app.api.dependencies import (
+    ReadableProjectDep,
+    ReadableTaskDep,
+    TaskServiceDep,
+    WritableProjectDep,
+    WritableTaskDep,
+)
 from app.api.v1.task_schemas import ErrorRead, TaskCreate, TaskRead, TaskUpdate
 from app.core.constants import (
     LIMIT_DEFAULT,
@@ -64,11 +70,9 @@ TASK_RESPONSES = (
 async def create_task(
     project_id: UUID,
     payload: TaskCreate,
+    access: WritableProjectDep,
     service: TaskServiceDep,
-    authorization: TaskAuthorizationDep,
-    user: CurrentUserDep,
 ) -> Task:
-    await authorization.require_project(user, project_id, write=True)
     return await service.create(
         project_id=project_id,
         title=payload.title,
@@ -85,13 +89,11 @@ async def create_task(
 )
 async def list_tasks(
     project_id: UUID,
+    access: ReadableProjectDep,
     service: TaskServiceDep,
-    authorization: TaskAuthorizationDep,
-    user: CurrentUserDep,
     page: Annotated[int, Query(ge=PAGE_MIN)] = PAGE_DEFAULT,
     limit: Annotated[int, Query(ge=LIMIT_MIN, le=LIMIT_MAX)] = LIMIT_DEFAULT,
 ) -> list[Task]:
-    await authorization.require_project(user, project_id, write=False)
     return await service.list_by_project(project_id, page=page, limit=limit)
 
 
@@ -101,13 +103,9 @@ async def list_tasks(
     responses=TASK_RESPONSES,
 )
 async def get_task(
-    task_id: UUID,
-    service: TaskServiceDep,
-    authorization: TaskAuthorizationDep,
-    user: CurrentUserDep,
+    task: ReadableTaskDep,
 ) -> Task:
-    await authorization.require_task(user, task_id, write=False)
-    return await service.get(task_id)
+    return task
 
 
 @tasks_router.patch(
@@ -116,14 +114,11 @@ async def get_task(
     responses=TASK_RESPONSES,
 )
 async def update_task(
-    task_id: UUID,
     payload: TaskUpdate,
+    task: WritableTaskDep,
     service: TaskServiceDep,
-    authorization: TaskAuthorizationDep,
-    user: CurrentUserDep,
 ) -> Task:
-    await authorization.require_task(user, task_id, write=True)
-    return await service.update(task_id, payload.to_changes())
+    return await service.update(task, payload.to_changes())
 
 
 @tasks_router.delete(
@@ -132,11 +127,8 @@ async def update_task(
     responses=TASK_RESPONSES,
 )
 async def delete_task(
-    task_id: UUID,
+    task: WritableTaskDep,
     service: TaskServiceDep,
-    authorization: TaskAuthorizationDep,
-    user: CurrentUserDep,
 ) -> Response:
-    await authorization.require_task(user, task_id, write=True)
-    await service.delete(task_id)
+    await service.delete(task)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

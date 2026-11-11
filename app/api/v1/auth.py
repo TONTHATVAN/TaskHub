@@ -3,6 +3,7 @@ from fastapi import APIRouter, Response, status
 from app.api.dependencies import AuthServiceDep, SessionServiceDep
 from app.api.exceptions import (
     EmailAlreadyRegisteredException,
+    InactiveUserException,
     InvalidRefreshTokenException,
     UnauthorizedException,
 )
@@ -13,7 +14,7 @@ from app.api.v1.auth_schemas import (
     TokenPairRead,
     UserRead,
 )
-from app.application.session_service import InvalidCredentialsError
+from app.application.session_service import InactiveUserError, InvalidCredentialsError
 from app.application.tokens import InvalidTokenError, TokenPair
 from app.core.messages import (
     INVALID_CREDENTIALS_MESSAGE,
@@ -40,6 +41,8 @@ async def login(payload: LoginRequest, service: SessionServiceDep) -> TokenPair:
         return await service.login(payload.email, payload.password)
     except InvalidCredentialsError as exc:
         raise UnauthorizedException(INVALID_CREDENTIALS_MESSAGE) from exc
+    except InactiveUserError as exc:
+        raise InactiveUserException() from exc
 
 
 @router.post("/refresh", response_model=TokenPairRead)
@@ -48,6 +51,8 @@ async def refresh(payload: RefreshRequest, service: SessionServiceDep) -> TokenP
         return await service.refresh(payload.refresh_token)
     except InvalidTokenError as exc:
         raise InvalidRefreshTokenException() from exc
+    except InactiveUserError as exc:
+        raise InactiveUserException() from exc
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

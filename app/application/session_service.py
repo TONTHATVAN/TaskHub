@@ -16,6 +16,10 @@ class InvalidCredentialsError(Exception):
     pass
 
 
+class InactiveUserError(Exception):
+    pass
+
+
 class SessionService:
     def __init__(
         self,
@@ -29,12 +33,12 @@ class SessionService:
 
     async def login(self, email: str, password: str) -> TokenPair:
         user = await self._users.get_by_email(email)
-        if (
-            user is None
-            or not user.is_active
-            or not await verify_password(password, user.hashed_password)
-        ):
+        if user is None:
             raise InvalidCredentialsError
+        if not await verify_password(password, user.hashed_password):
+            raise InvalidCredentialsError
+        if not user.is_active:
+            raise InactiveUserError
         return await self._issue_pair(user.id)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
@@ -51,9 +55,11 @@ class SessionService:
         if claims.token_id is None:
             raise InvalidTokenError
         if require_active:
-            user = await self._users.get_by_id(claims.user_id)
-            if user is None or not user.is_active:
+            user = await self._users.get_by_id_for_update(claims.user_id)
+            if user is None:
                 raise InvalidTokenError
+            if not user.is_active:
+                raise InactiveUserError
         if not await self._refresh_tokens.consume(
             claims.token_id, claims.user_id, datetime.now(UTC)
         ):
