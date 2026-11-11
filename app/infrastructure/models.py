@@ -1,5 +1,4 @@
 from datetime import datetime
-from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -16,11 +15,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.constants import (
+    PROJECT_NAME_MAX_LENGTH,
     TASK_TITLE_MAX_LENGTH,
     USER_EMAIL_MAX_LENGTH,
     USER_FULL_NAME_MAX_LENGTH,
     WORKSPACE_NAME_MAX_LENGTH,
 )
+from app.domain.project import ProjectStatus
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.user import UserRole
 from app.domain.workspace import WorkspaceRole
@@ -28,11 +29,6 @@ from app.domain.workspace import WorkspaceRole
 
 class Base(DeclarativeBase):
     pass
-
-
-class ProjectStatus(StrEnum):
-    ACTIVE = "ACTIVE"
-    ARCHIVED = "ARCHIVED"
 
 
 class UserModel(Base):
@@ -145,7 +141,7 @@ class ProjectModel(Base):
     workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(PROJECT_NAME_MAX_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(

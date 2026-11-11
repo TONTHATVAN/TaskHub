@@ -1,10 +1,13 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.workspace import Workspace, WorkspaceRole
-from app.infrastructure.models import WorkspaceMemberModel, WorkspaceModel
+from app.domain.exceptions import UserNotFoundError, WorkspaceNotFoundError
+from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
+from app.infrastructure.models import UserModel, WorkspaceMemberModel, WorkspaceModel
 
 
 class SqlWorkspaceRepository:
@@ -52,5 +55,60 @@ class SqlWorkspaceRepository:
             delete(WorkspaceModel)
             .where(WorkspaceModel.id == workspace_id)
             .returning(WorkspaceModel.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_member_role(
+        self, workspace_id: UUID, user_id: UUID
+    ) -> WorkspaceRole | None:
+        return await self._session.scalar(
+            select(WorkspaceMemberModel.role).where(
+                WorkspaceMemberModel.workspace_id == workspace_id,
+                WorkspaceMemberModel.user_id == user_id,
+            )
+        )
+
+    async def list_members(self, workspace_id: UUID) -> list[WorkspaceMember]:
+        rows = await self._session.execute(
+            select(WorkspaceMemberModel.user_id, WorkspaceMemberModel.role)
+            .where(WorkspaceMemberModel.workspace_id == workspace_id)
+            .order_by(WorkspaceMemberModel.user_id)
+        )
+        return [WorkspaceMember(row.user_id, row.role) for row in rows]
+
+    async def add_member(
+        self, workspace_id: UUID, user_id: UUID, role: WorkspaceRole
+    ) -> bool:
+        try:
+            async with self._session.begin_nested():
+                result = await self._session.execute(
+                    insert(WorkspaceMemberModel)
+                    .values(workspace_id=workspace_id, user_id=user_id, role=role)
+                    .on_conflict_do_nothing()
+                    .returning(WorkspaceMemberModel.user_id)
+                )
+        except IntegrityError as exc:
+            workspace_exists = await self._session.scalar(
+                select(WorkspaceModel.id).where(WorkspaceModel.id == workspace_id)
+            )
+            if workspace_exists is None:
+                raise WorkspaceNotFoundError from exc
+            user_exists = await self._session.scalar(
+                select(UserModel.id).where(UserModel.id == user_id)
+            )
+            if user_exists is None:
+                raise UserNotFoundError from exc
+            raise
+        return result.scalar_one_or_none() is not None
+
+    async def remove_member(self, workspace_id: UUID, user_id: UUID) -> bool:
+        result = await self._session.execute(
+            delete(WorkspaceMemberModel)
+            .where(
+                WorkspaceMemberModel.workspace_id == workspace_id,
+                WorkspaceMemberModel.user_id == user_id,
+                WorkspaceMemberModel.role != WorkspaceRole.OWNER,
+            )
+            .returning(WorkspaceMemberModel.user_id)
         )
         return result.scalar_one_or_none() is not None

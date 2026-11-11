@@ -34,6 +34,12 @@ class SqlUserRepository:
         )
         return self._to_domain(model) if model is not None else None
 
+    async def get_by_email_for_update(self, email: str) -> User | None:
+        model = await self._session.scalar(
+            select(UserModel).where(UserModel.email == email).with_for_update()
+        )
+        return self._to_domain(model) if model is not None else None
+
     async def get_by_id(self, user_id: UUID) -> User | None:
         model = await self._repository.get(user_id)
         return self._to_domain(model) if model is not None else None
@@ -70,12 +76,22 @@ class SqlUserRepository:
             raise UserNotFoundError
         return self._to_domain(model)
 
-    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+    async def update_password(
+        self, user_id: UUID, expected_hash: str, hashed_password: str
+    ) -> bool:
         result = await self._session.execute(
             update(UserModel)
-            .where(UserModel.id == user_id)
+            .where(UserModel.id == user_id, UserModel.hashed_password == expected_hash)
             .values(hashed_password=hashed_password)
             .returning(UserModel.id)
         )
-        if result.scalar_one_or_none() is None:
+        if result.scalar_one_or_none() is not None:
+            return True
+        if (
+            await self._session.scalar(
+                select(UserModel.id).where(UserModel.id == user_id)
+            )
+            is None
+        ):
             raise UserNotFoundError
+        return False

@@ -8,7 +8,10 @@ from app.application.tokens import (
     TokenPair,
     TokenType,
 )
-from app.domain.refresh_token_repository import RefreshTokenRepository
+from app.domain.refresh_token_repository import (
+    RefreshConsumeResult,
+    RefreshTokenRepository,
+)
 from app.domain.user_repository import UserRepository
 
 
@@ -17,6 +20,10 @@ class InvalidCredentialsError(Exception):
 
 
 class InactiveUserError(Exception):
+    pass
+
+
+class ReplayedRefreshTokenError(Exception):
     pass
 
 
@@ -32,7 +39,7 @@ class SessionService:
         self._tokens = tokens
 
     async def login(self, email: str, password: str) -> TokenPair:
-        user = await self._users.get_by_email(email)
+        user = await self._users.get_by_email_for_update(email)
         if user is None:
             raise InvalidCredentialsError
         if not await verify_password(password, user.hashed_password):
@@ -52,17 +59,20 @@ class SessionService:
         self, refresh_token: str, *, require_active: bool = False
     ) -> UUID:
         claims = self._tokens.decode(refresh_token, TokenType.REFRESH)
-        if claims.token_id is None:
-            raise InvalidTokenError
         if require_active:
             user = await self._users.get_by_id_for_update(claims.user_id)
             if user is None:
                 raise InvalidTokenError
             if not user.is_active:
                 raise InactiveUserError
-        if not await self._refresh_tokens.consume(
-            claims.token_id, claims.user_id, datetime.now(UTC)
-        ):
+        now = datetime.now(UTC)
+        consume_result = await self._refresh_tokens.consume(
+            claims.token_id, claims.user_id, now
+        )
+        if consume_result is RefreshConsumeResult.REPLAYED:
+            await self._refresh_tokens.revoke_all(claims.user_id, now)
+            raise ReplayedRefreshTokenError
+        if consume_result is RefreshConsumeResult.INVALID:
             raise InvalidTokenError
         return claims.user_id
 

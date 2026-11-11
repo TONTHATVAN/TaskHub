@@ -24,12 +24,21 @@ class BaseRepository(Generic[ModelT]):
         self.session = session
         self.model = model
 
+    def _key_values(self, entity_id: EntityId) -> tuple[UUID, ...]:
+        values = entity_id if isinstance(entity_id, tuple) else (entity_id,)
+        if len(values) != len(inspect(self.model).primary_key) or any(
+            value is None for value in values
+        ):
+            raise NotFoundError(f"{self.model.__name__} primary key is required")
+        return values
+
     async def add(self, entity: ModelT) -> ModelT:
         self.session.add(entity)
         await self.session.flush()
         return entity
 
     async def get(self, entity_id: EntityId) -> ModelT | None:
+        self._key_values(entity_id)
         return await self.session.get(self.model, entity_id)
 
     async def list(
@@ -52,21 +61,31 @@ class BaseRepository(Generic[ModelT]):
         if any(value is None for value in key_values):
             raise NotFoundError(f"{self.model.__name__} primary key is required")
 
+        state = inspect(entity)
         values = {
             column.name: getattr(entity, column.name)
             for column in inspect(self.model).columns
-            if not column.primary_key
+            if not column.primary_key and state.attrs[column.name].history.has_changes()
         }
         # A managed, dirty instance would otherwise flush before the explicit UPDATE.
-        if inspect(entity).session is self.session.sync_session:
+        if state.session is self.session.sync_session:
             self.session.expunge(entity)
-        result = await self.session.execute(
-            update(self.model)
-            .where(*(column == value for column, value in zip(key_columns, key_values)))
-            .values(**values)
-            .returning(*key_columns)
+        predicate = tuple(
+            column == value for column, value in zip(key_columns, key_values)
         )
-        if result.first() is None:
+        if values:
+            result = await self.session.execute(
+                update(self.model)
+                .where(*predicate)
+                .values(**values)
+                .returning(*key_columns)
+            )
+            found = result.first() is not None
+        else:
+            found = (
+                await self.session.execute(select(*key_columns).where(*predicate))
+            ).first() is not None
+        if not found:
             raise NotFoundError(f"{self.model.__name__} not found")
         entity_id = key_values[0] if len(key_values) == 1 else key_values
         saved = await self.get(entity_id)
@@ -75,7 +94,7 @@ class BaseRepository(Generic[ModelT]):
 
     async def delete(self, entity_id: EntityId) -> bool:
         key_columns = inspect(self.model).primary_key
-        key_values = entity_id if isinstance(entity_id, tuple) else (entity_id,)
+        key_values = self._key_values(entity_id)
         result = await self.session.execute(
             delete(self.model)
             .where(*(column == value for column, value in zip(key_columns, key_values)))

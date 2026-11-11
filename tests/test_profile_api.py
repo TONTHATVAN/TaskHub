@@ -65,6 +65,7 @@ def test_profile_update_and_password_change() -> None:
 
         for payload in (
             {"email": None},
+            {"role": "ADMIN"},
             {"full_name": None},
             {"full_name": "  "},
             {"full_name": "x" * 201},

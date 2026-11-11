@@ -1,5 +1,6 @@
 import asyncio
 import os
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -7,11 +8,18 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
+from test_auth_api import MemoryUserRepository
 
-from app.api.dependencies import get_current_user, get_workspace_repository
+from app.api.dependencies import (
+    get_current_user,
+    get_user_repository,
+    get_workspace_repository,
+)
 from app.application.tokens import JwtTokenService
+from app.application.workspace_service import WorkspaceService
+from app.domain.exceptions import WorkspaceNotFoundError
 from app.domain.user import User, UserRole
-from app.domain.workspace import Workspace, WorkspaceRole
+from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
 from app.infrastructure.database import engine, session_factory
 from app.infrastructure.models import (
     ProjectModel,
@@ -38,10 +46,12 @@ def make_user(role: UserRole = UserRole.MEMBER) -> User:
 class MemoryWorkspaceRepository:
     def __init__(self) -> None:
         self.workspaces: dict[UUID, Workspace] = {}
+        self.members: dict[tuple[UUID, UUID], WorkspaceRole] = {}
 
     async def add(self, name: str, owner_id: UUID) -> Workspace:
         workspace = Workspace(uuid4(), name, owner_id, datetime.now(UTC))
         self.workspaces[workspace.id] = workspace
+        self.members[workspace.id, owner_id] = WorkspaceRole.OWNER
         return workspace
 
     async def get(self, workspace_id: UUID) -> Workspace | None:
@@ -56,7 +66,57 @@ class MemoryWorkspaceRepository:
         return updated
 
     async def delete(self, workspace_id: UUID) -> bool:
-        return self.workspaces.pop(workspace_id, None) is not None
+        if self.workspaces.pop(workspace_id, None) is None:
+            return False
+        self.members = {
+            key: role for key, role in self.members.items() if key[0] != workspace_id
+        }
+        return True
+
+    async def get_member_role(
+        self, workspace_id: UUID, user_id: UUID
+    ) -> WorkspaceRole | None:
+        return self.members.get((workspace_id, user_id))
+
+    async def list_members(self, workspace_id: UUID) -> list[WorkspaceMember]:
+        return [
+            WorkspaceMember(user_id, role)
+            for (stored_workspace_id, user_id), role in self.members.items()
+            if stored_workspace_id == workspace_id
+        ]
+
+    async def add_member(
+        self, workspace_id: UUID, user_id: UUID, role: WorkspaceRole
+    ) -> bool:
+        if (workspace_id, user_id) in self.members:
+            return False
+        self.members[workspace_id, user_id] = role
+        return True
+
+    async def remove_member(self, workspace_id: UUID, user_id: UUID) -> bool:
+        role = self.members.get((workspace_id, user_id))
+        if role is None or role is WorkspaceRole.OWNER:
+            return False
+        del self.members[workspace_id, user_id]
+        return True
+
+
+def test_removed_workspace_reports_workspace_not_found() -> None:
+    class DeletedWorkspaceRepository(MemoryWorkspaceRepository):
+        async def remove_member(self, workspace_id: UUID, user_id: UUID) -> bool:
+            self.workspaces.pop(workspace_id, None)
+            return False
+
+    async def exercise() -> None:
+        owner = make_user()
+        member = make_user()
+        repository = DeletedWorkspaceRepository()
+        workspace = await repository.add("Team", owner.id)
+        service = WorkspaceService(repository, MemoryUserRepository())
+        with pytest.raises(WorkspaceNotFoundError):
+            await service.remove_member(owner, workspace.id, member.id)
+
+    asyncio.run(exercise())
 
 
 def test_workspace_crud_validation_and_owner_permissions() -> None:
@@ -111,6 +171,107 @@ def test_workspace_crud_validation_and_owner_permissions() -> None:
         assert client.delete(endpoint).status_code == 404
 
 
+def test_workspace_members_and_role_boundaries() -> None:
+    owner, editor, viewer, outsider = (make_user() for _ in range(4))
+    admin = make_user(UserRole.ADMIN)
+    current = [owner]
+    repository = MemoryWorkspaceRepository()
+    users = MemoryUserRepository()
+    users.users = {
+        user.email: user for user in (owner, editor, viewer, outsider, admin)
+    }
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: current[0]
+    app.dependency_overrides[get_workspace_repository] = lambda: repository
+    app.dependency_overrides[get_user_repository] = lambda: users
+
+    with TestClient(app) as client:
+        created = client.post("/api/v1/workspaces", json={"name": "Team"})
+        workspace = f"/api/v1/workspaces/{created.json()['id']}"
+        members = f"{workspace}/members"
+        assert created.status_code == 201
+        assert (
+            client.post(
+                "/api/v1/workspaces",
+                json={"name": "Injected", "owner_id": str(outsider.id)},
+            ).status_code
+            == 422
+        )
+
+        invite_editor = client.post(
+            members, json={"user_id": str(editor.id), "role": "EDITOR"}
+        )
+        assert invite_editor.status_code == 201
+        assert invite_editor.json() == {"user_id": str(editor.id), "role": "EDITOR"}
+        duplicate = client.post(
+            members, json={"user_id": str(editor.id), "role": "EDITOR"}
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json() == {"detail": "User is already a workspace member"}
+        assert (
+            client.post(
+                members, json={"user_id": str(viewer.id), "role": "OWNER"}
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                members, json={"user_id": str(uuid4()), "role": "VIEWER"}
+            ).status_code
+            == 404
+        )
+        inactive = replace(outsider, is_active=False)
+        users.users[outsider.email] = inactive
+        inactive_invite = client.post(
+            members, json={"user_id": str(outsider.id), "role": "VIEWER"}
+        )
+        assert inactive_invite.status_code == 409
+        assert inactive_invite.json() == {
+            "detail": "Inactive user cannot join workspace"
+        }
+        users.users[outsider.email] = outsider
+        assert (
+            client.post(
+                members, json={"user_id": str(viewer.id), "role": "VIEWER"}
+            ).status_code
+            == 201
+        )
+        assert {row["user_id"] for row in client.get(members).json()} == {
+            str(owner.id),
+            str(editor.id),
+            str(viewer.id),
+        }
+
+        for member in (editor, viewer):
+            current[0] = member
+            assert client.get(workspace).status_code == 200
+            assert client.get(members).status_code == 200
+            assert client.patch(workspace, json={"name": "Denied"}).status_code == 403
+            assert client.delete(workspace).status_code == 403
+            assert (
+                client.post(
+                    members, json={"user_id": str(outsider.id), "role": "EDITOR"}
+                ).status_code
+                == 403
+            )
+            assert client.delete(f"{members}/{editor.id}").status_code == 403
+
+        current[0] = outsider
+        assert client.get(workspace).status_code == 403
+        assert client.get(members).status_code == 403
+
+        current[0] = owner
+        assert client.delete(f"{members}/{owner.id}").status_code == 403
+        assert client.delete(f"{members}/{outsider.id}").status_code == 404
+        assert client.delete(f"{members}/{editor.id}").status_code == 204
+        assert client.delete(f"{members}/{editor.id}").status_code == 404
+        current[0] = editor
+        assert client.get(workspace).status_code == 403
+        current[0] = admin
+        assert client.get(members).status_code == 200
+        assert client.delete(f"{members}/{viewer.id}").status_code == 204
+
+
 def test_workspace_endpoints_require_token_and_document_errors() -> None:
     app = create_app()
     app.dependency_overrides[get_workspace_repository] = MemoryWorkspaceRepository
@@ -119,6 +280,22 @@ def test_workspace_endpoints_require_token_and_document_errors() -> None:
         operation = paths["/api/v1/workspaces/{workspace_id}"][method]
         assert "HTTPBearer" in operation["security"][0]
         assert {"401", "403", "404"} <= operation["responses"].keys()
+    for method in ("get", "post"):
+        operation = paths["/api/v1/workspaces/{workspace_id}/members"][method]
+        assert "HTTPBearer" in operation["security"][0]
+        assert {"401", "403", "404"} <= operation["responses"].keys()
+    assert (
+        "409" in paths["/api/v1/workspaces/{workspace_id}/members"]["post"]["responses"]
+    )
+    assert (
+        paths["/api/v1/workspaces/{workspace_id}"]["get"]["responses"]["404"][
+            "description"
+        ]
+        == "Workspace not found"
+    )
+    assert {"401", "403", "404"} <= paths[
+        "/api/v1/workspaces/{workspace_id}/members/{member_id}"
+    ]["delete"]["responses"].keys()
 
     with TestClient(app) as client:
         workspace_id = uuid4()
@@ -127,6 +304,12 @@ def test_workspace_endpoints_require_token_and_document_errors() -> None:
             client.get(f"/api/v1/workspaces/{workspace_id}"),
             client.patch(f"/api/v1/workspaces/{workspace_id}", json={"name": "Team"}),
             client.delete(f"/api/v1/workspaces/{workspace_id}"),
+            client.get(f"/api/v1/workspaces/{workspace_id}/members"),
+            client.post(
+                f"/api/v1/workspaces/{workspace_id}/members",
+                json={"user_id": str(uuid4()), "role": "EDITOR"},
+            ),
+            client.delete(f"/api/v1/workspaces/{workspace_id}/members/{uuid4()}"),
         ):
             assert response.status_code == 401
             assert response.headers["WWW-Authenticate"] == "Bearer"
@@ -210,6 +393,7 @@ async def _exercise_workspace_postgres() -> None:
             assert created.status_code == 201
             workspace_id = UUID(created.json()["id"])
             endpoint = f"/api/v1/workspaces/{workspace_id}"
+            members_endpoint = f"{endpoint}/members"
 
             async with session_factory() as session:
                 membership = await session.get(
@@ -234,6 +418,46 @@ async def _exercise_workspace_postgres() -> None:
                 await client.patch(
                     endpoint, json={"name": "Denied"}, headers=other_headers
                 )
+            ).status_code == 403
+            invited = await client.post(
+                members_endpoint,
+                json={"user_id": str(other_id), "role": "VIEWER"},
+                headers=owner_headers,
+            )
+            assert invited.status_code == 201
+            assert (
+                await client.post(
+                    members_endpoint,
+                    json={"user_id": str(other_id), "role": "VIEWER"},
+                    headers=owner_headers,
+                )
+            ).status_code == 409
+            async with session_factory() as session:
+                membership = await session.get(
+                    WorkspaceMemberModel, (workspace_id, other_id)
+                )
+                assert membership is not None
+                assert membership.role == WorkspaceRole.VIEWER
+            assert (
+                await client.get(endpoint, headers=other_headers)
+            ).status_code == 200
+            assert (
+                await client.patch(
+                    endpoint, json={"name": "Denied"}, headers=other_headers
+                )
+            ).status_code == 403
+            assert (
+                await client.delete(
+                    f"{members_endpoint}/{owner_id}", headers=owner_headers
+                )
+            ).status_code == 403
+            assert (
+                await client.delete(
+                    f"{members_endpoint}/{other_id}", headers=owner_headers
+                )
+            ).status_code == 204
+            assert (
+                await client.get(endpoint, headers=other_headers)
             ).status_code == 403
             renamed = await client.patch(
                 endpoint, json={"name": "Renamed"}, headers=owner_headers

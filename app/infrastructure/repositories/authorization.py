@@ -12,20 +12,27 @@ class SqlProjectAccessRepository:
         self._session = session
 
     async def get_project_access(
-        self, project_id: UUID, user_id: UUID
+        self, project_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> ProjectAccess | None:
-        row = (
-            await self._session.execute(
-                select(WorkspaceModel.owner_id, WorkspaceMemberModel.role)
-                .join(ProjectModel, ProjectModel.workspace_id == WorkspaceModel.id)
-                .outerjoin(
-                    WorkspaceMemberModel,
-                    (WorkspaceMemberModel.workspace_id == WorkspaceModel.id)
-                    & (WorkspaceMemberModel.user_id == user_id),
-                )
-                .where(ProjectModel.id == project_id)
+        statement = (
+            select(
+                WorkspaceModel.owner_id,
+                WorkspaceMemberModel.role,
+                ProjectModel.status,
             )
-        ).one_or_none()
+            .join(ProjectModel, ProjectModel.workspace_id == WorkspaceModel.id)
+            .outerjoin(
+                WorkspaceMemberModel,
+                (WorkspaceMemberModel.workspace_id == WorkspaceModel.id)
+                & (WorkspaceMemberModel.user_id == user_id),
+            )
+            .where(ProjectModel.id == project_id)
+        )
+        if for_update:
+            statement = statement.with_for_update(of=ProjectModel)
+        row = (await self._session.execute(statement)).one_or_none()
         if row is None:
             return None
-        return ProjectAccess(owner_id=row.owner_id, member_role=row.role)
+        return ProjectAccess(
+            owner_id=row.owner_id, member_role=row.role, status=row.status
+        )

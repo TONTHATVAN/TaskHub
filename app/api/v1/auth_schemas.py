@@ -72,6 +72,8 @@ class UserRead(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: EmailStr | None = Field(default=None, max_length=USER_EMAIL_MAX_LENGTH)
     full_name: str | None = Field(
         default=None,

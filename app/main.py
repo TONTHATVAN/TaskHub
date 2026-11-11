@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.api.error_handling import app_error_response
 from app.api.router import api_router
 from app.core.exceptions import AppException
 from app.infrastructure.database import engine
@@ -25,11 +26,7 @@ def create_app() -> FastAPI:
     async def app_exception_handler(
         _request: Request, exc: AppException
     ) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.message},
-            headers=exc.headers,
-        )
+        return app_error_response(exc)
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:

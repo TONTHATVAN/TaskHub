@@ -15,7 +15,7 @@ TaskTitle = Annotated[
 
 
 class TaskPayload(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
 
 class TaskCreate(TaskPayload):

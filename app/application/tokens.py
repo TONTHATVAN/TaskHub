@@ -20,7 +20,7 @@ class TokenType(StrEnum):
 @dataclass(frozen=True, slots=True)
 class TokenClaims:
     user_id: UUID
-    token_id: UUID | None
+    token_id: UUID
     expires_at: datetime
 
 
@@ -44,6 +44,7 @@ class JwtTokenService:
             TokenType.ACCESS,
             now,
             now + timedelta(minutes=self._access_minutes),
+            uuid4(),
         )
 
     def issue_refresh(self, user_id: UUID) -> tuple[str, UUID, datetime]:
@@ -61,14 +62,12 @@ class JwtTokenService:
                 algorithms=[JWT_ALGORITHM],
                 audience=JWT_AUDIENCE,
                 issuer=JWT_ISSUER,
-                options={"require": ["sub", "type", "iat", "exp", "iss", "aud"]},
+                options={"require": ["sub", "type", "jti", "iat", "exp", "iss", "aud"]},
             )
             if payload["type"] != expected_type:
                 raise InvalidTokenError
             user_id = UUID(payload["sub"])
-            token_id = (
-                UUID(payload["jti"]) if expected_type is TokenType.REFRESH else None
-            )
+            token_id = UUID(payload["jti"])
             expires_at = datetime.fromtimestamp(payload["exp"], UTC)
         except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
             raise InvalidTokenError from exc
@@ -80,16 +79,15 @@ class JwtTokenService:
         token_type: TokenType,
         issued_at: datetime,
         expires_at: datetime,
-        token_id: UUID | None = None,
+        token_id: UUID,
     ) -> str:
         payload = {
             "sub": str(user_id),
             "type": token_type,
+            "jti": str(token_id),
             "iat": issued_at,
             "exp": expires_at,
             "iss": JWT_ISSUER,
             "aud": JWT_AUDIENCE,
         }
-        if token_id is not None:
-            payload["jti"] = str(token_id)
         return jwt.encode(payload, self._secret_key, algorithm=JWT_ALGORITHM)

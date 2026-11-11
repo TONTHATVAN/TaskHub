@@ -8,20 +8,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
 from app.application.profile_service import ProfileService
+from app.application.project_service import ProjectService
 from app.application.session_service import SessionService
 from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
 from app.domain.authorization import ProjectAccess, ProjectAccessRepository
+from app.domain.project_repository import ProjectRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task import Task
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
+from app.domain.workspace import Workspace
 from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
+from app.infrastructure.repositories.project import SqlProjectRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
 from app.infrastructure.repositories.user import SqlUserRepository
@@ -62,6 +66,12 @@ TaskAuthorizationDep = Annotated[
 ]
 
 
+async def get_user_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> UserRepository:
+    return SqlUserRepository(session)
+
+
 async def get_workspace_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> WorkspaceRepository:
@@ -70,17 +80,27 @@ async def get_workspace_repository(
 
 def get_workspace_service(
     repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
 ) -> WorkspaceService:
-    return WorkspaceService(repository)
+    return WorkspaceService(repository, users)
 
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
-async def get_user_repository(
+async def get_project_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
-) -> UserRepository:
-    return SqlUserRepository(session)
+) -> ProjectRepository:
+    return SqlProjectRepository(session)
+
+
+def get_project_service(
+    repository: Annotated[ProjectRepository, Depends(get_project_repository)],
+) -> ProjectService:
+    return ProjectService(repository)
+
+
+ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 
 
 def get_auth_service(
@@ -167,6 +187,26 @@ async def get_writable_project(
     return await authorization.require_project(user, project_id, write=True)
 
 
+async def get_writable_archived_project(
+    project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> ProjectAccess:
+    return await authorization.require_project(
+        user, project_id, write=True, allow_archived=True
+    )
+
+
+async def get_readable_workspace(
+    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
+) -> Workspace:
+    return await service.get(user, workspace_id)
+
+
+async def get_writable_workspace(
+    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
+) -> Workspace:
+    return await service.require_write(user, workspace_id)
+
+
 async def get_readable_task(
     task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
 ) -> Task:
@@ -181,5 +221,10 @@ async def get_writable_task(
 
 ReadableProjectDep = Annotated[ProjectAccess, Depends(get_readable_project)]
 WritableProjectDep = Annotated[ProjectAccess, Depends(get_writable_project)]
+WritableArchivedProjectDep = Annotated[
+    ProjectAccess, Depends(get_writable_archived_project)
+]
+ReadableWorkspaceDep = Annotated[Workspace, Depends(get_readable_workspace)]
+WritableWorkspaceDep = Annotated[Workspace, Depends(get_writable_workspace)]
 ReadableTaskDep = Annotated[Task, Depends(get_readable_task)]
 WritableTaskDep = Annotated[Task, Depends(get_writable_task)]

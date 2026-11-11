@@ -16,3 +16,9 @@ class Workspace:
     name: str
     owner_id: UUID
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceMember:
+    user_id: UUID
+    role: WorkspaceRole

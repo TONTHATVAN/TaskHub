@@ -129,10 +129,10 @@ Toàn bộ endpoint Task yêu cầu Bearer access token. Quyền được xác �
 | Thành viên `VIEWER` | Có | Không |
 | Người không thuộc Workspace | Không | Không |
 
-Thiếu hoặc sai access token trả 401; không đủ quyền trả 403; Project hoặc Task không tồn tại trả 404. Quyền được đọc từ database ở mỗi request nên việc thay đổi thành viên có hiệu lực ngay. Cần có Workspace, Project và thành viên trong database để thử API Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.
+Thiếu hoặc sai access token trả 401; không đủ quyền trả 403; Project hoặc Task không tồn tại trả 404. Quyền được đọc từ database ở mỗi request, nên request bắt đầu sau khi thay đổi thành viên đã được lưu sẽ áp dụng quyền mới. Cần có Workspace, Project và thành viên trong database để thử API Task. Tài liệu yêu cầu gốc gom buổi 3–7 chung một nhóm, nên phạm vi buổi 4 ở đây được chia theo nhóm chức năng để triển khai từng phần có thể kiểm chứng.
 
-## Buổi 5 — Workspace CRUD (phần đầu)
+## Buổi 5 — Workspace và Project
 
-Người dùng đã đăng nhập có thể tạo Workspace qua `POST /api/v1/workspaces`; họ trở thành chủ sở hữu và được thêm vào `workspace_members` với vai trò `OWNER` trong cùng giao dịch. Chủ sở hữu hoặc người dùng `ADMIN` có thể xem, đổi tên và xóa Workspace qua `GET`, `PATCH`, `DELETE /api/v1/workspaces/{workspace_id}`. Tên được trim, không được rỗng và dài tối đa 200 ký tự. Thiếu token trả 401, không có quyền trả 403, Workspace không tồn tại trả 404. Xóa Workspace cũng xóa membership và Project con theo khóa ngoại cascade.
+Người dùng đã đăng nhập tạo Workspace qua `POST /api/v1/workspaces`; họ trở thành chủ sở hữu và được thêm vào `workspace_members` với vai trò `OWNER` trong cùng giao dịch. Chủ sở hữu hoặc `ADMIN` có thể đổi tên, xóa Workspace. Thành viên `EDITOR` và `VIEWER` có thể xem Workspace; người ngoài nhận 403. `GET /api/v1/workspaces/{workspace_id}/members` liệt kê thành viên. Chủ sở hữu hoặc `ADMIN` thêm thành viên bằng `POST /api/v1/workspaces/{workspace_id}/members` (vai trò `EDITOR`/`VIEWER`) và xóa bằng `DELETE /api/v1/workspaces/{workspace_id}/members/{member_id}`. Không thể thêm trùng hoặc xóa chủ sở hữu.
 
-Phần mời/xóa thành viên và API Project thuộc phần tiếp theo của Buổi 5.
+Trong Workspace, `OWNER`/`EDITOR` và `ADMIN` được tạo Project qua `POST /api/v1/workspaces/{workspace_id}/projects`; các thành viên được xem danh sách qua `GET` (có `page`/`limit`). `GET`, `PATCH`, `DELETE /api/v1/projects/{project_id}` và `POST /api/v1/projects/{project_id}/archive` dùng cùng quyền theo Workspace. Sau khi archive, Project và Task vẫn đọc được nhưng thao tác ghi trả 409; Project vẫn có thể xóa. Tên Workspace và Project được trim, giới hạn 200 ký tự. API trả 401 khi thiếu token, 403 khi thiếu quyền và 404 khi resource không tồn tại. Xóa Workspace hoặc Project sẽ xóa dữ liệu con qua khóa ngoại cascade.

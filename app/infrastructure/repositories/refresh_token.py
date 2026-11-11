@@ -1,9 +1,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.refresh_token_repository import RefreshConsumeResult
 from app.infrastructure.models import RefreshTokenModel
 
 
@@ -17,7 +18,9 @@ class SqlRefreshTokenRepository:
         )
         await self._session.flush()
 
-    async def consume(self, token_id: UUID, user_id: UUID, now: datetime) -> bool:
+    async def consume(
+        self, token_id: UUID, user_id: UUID, now: datetime
+    ) -> RefreshConsumeResult:
         result = await self._session.execute(
             update(RefreshTokenModel)
             .where(
@@ -29,7 +32,19 @@ class SqlRefreshTokenRepository:
             .values(revoked_at=now)
             .returning(RefreshTokenModel.id)
         )
-        return result.scalar_one_or_none() is not None
+        if result.scalar_one_or_none() is not None:
+            return RefreshConsumeResult.CONSUMED
+        stored = (
+            await self._session.execute(
+                select(RefreshTokenModel.revoked_at).where(
+                    RefreshTokenModel.id == token_id,
+                    RefreshTokenModel.user_id == user_id,
+                )
+            )
+        ).one_or_none()
+        if stored is not None and stored.revoked_at is not None:
+            return RefreshConsumeResult.REPLAYED
+        return RefreshConsumeResult.INVALID
 
     async def revoke_all(self, user_id: UUID, now: datetime) -> None:
         await self._session.execute(

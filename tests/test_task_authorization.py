@@ -34,7 +34,7 @@ class MemoryProjectAccessRepository:
         self.members: dict[UUID, WorkspaceRole] = {}
 
     async def get_project_access(
-        self, project_id: UUID, user_id: UUID
+        self, project_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> ProjectAccess | None:
         if project_id != self.project_id:
             return None

@@ -1,6 +1,6 @@
 from http import HTTPStatus
 
-from app.core.constants import BEARER_SCHEME
+from app.core.constants import BEARER_SCHEME, WWW_AUTHENTICATE_HEADER
 from app.core.exceptions import AppException
 from app.core.messages import (
     CURRENT_PASSWORD_INCORRECT_MESSAGE,
@@ -32,7 +32,7 @@ class UnauthorizedException(AppException):
         super().__init__(
             detail,
             HTTPStatus.UNAUTHORIZED,
-            {"WWW-Authenticate": BEARER_SCHEME},
+            {WWW_AUTHENTICATE_HEADER: BEARER_SCHEME},
         )
 
 

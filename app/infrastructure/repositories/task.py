@@ -43,7 +43,10 @@ class SqlTaskRepository:
             async with self._session.begin_nested():
                 await self._repository.add(model)
         except IntegrityError as exc:
-            if await self._session.get(ProjectModel, task.project_id) is None:
+            project_exists = await self._session.scalar(
+                select(ProjectModel.id).where(ProjectModel.id == task.project_id)
+            )
+            if project_exists is None:
                 raise ProjectNotFoundError from exc
             raise
 

@@ -131,6 +131,12 @@ def test_validation_project_scope_and_lifespan() -> None:
     with TestClient(app) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
         assert client.post(endpoint, json={"title": "   "}).status_code == 422
+        assert (
+            client.post(
+                endpoint, json={"title": "Task", "assignee_id": str(uuid4())}
+            ).status_code
+            == 422
+        )
         assert client.post(endpoint, json={"title": None}).status_code == 422
         assert client.post(endpoint, json={"title": "x" * 201}).status_code == 422
         assert (
