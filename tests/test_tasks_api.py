@@ -135,6 +135,94 @@ def test_task_crud_flow() -> None:
         assert client.get(f"/api/v1/projects/{project_id}/tasks").json() == []
 
 
+def test_task_assignment_due_date_and_filters() -> None:
+    project_id = uuid4()
+    assignee_id = uuid4()
+    other_assignee_id = uuid4()
+    repository = InMemoryTaskRepository()
+    repository.assignable_users.add(assignee_id)
+    app = create_test_app()
+    app.dependency_overrides[get_task_repository] = lambda: repository
+    app.dependency_overrides[get_task_authorization_service] = lambda: AllowTaskAccess(
+        repository
+    )
+    endpoint = f"/api/v1/projects/{project_id}/tasks"
+    due_date = "2026-12-01T09:00:00+07:00"
+
+    with TestClient(app) as client:
+        invalid = client.post(
+            endpoint, json={"title": "Invalid", "assignee_id": str(other_assignee_id)}
+        )
+        assert invalid.status_code == 409
+        assert invalid.json() == {
+            "detail": "Assignee must be an active workspace member"
+        }
+        assert client.get(endpoint).json() == []
+        assert (
+            client.post(
+                endpoint, json={"title": "Naive", "due_date": "2026-12-01T09:00:00"}
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                endpoint, json={"title": "Forged", "created_by": str(uuid4())}
+            ).status_code
+            == 422
+        )
+
+        assigned = client.post(
+            endpoint,
+            json={
+                "title": "Assigned",
+                "assignee_id": str(assignee_id),
+                "due_date": due_date,
+                "priority": "HIGH",
+            },
+        )
+        assert assigned.status_code == 201
+        task = assigned.json()
+        assert task["assignee_id"] == str(assignee_id)
+        assert datetime.fromisoformat(task["due_date"]).utcoffset() is not None
+        assert task["created_by"] is not None
+        unassigned = client.post(endpoint, json={"title": "Unassigned"})
+        assert unassigned.status_code == 201
+
+        for params in (
+            {"assignee_id": str(assignee_id)},
+            {"priority": "HIGH"},
+            {"status": "TODO", "assignee_id": str(assignee_id), "limit": 1},
+        ):
+            listed = client.get(endpoint, params=params)
+            assert listed.status_code == 200
+            assert [item["id"] for item in listed.json()] == [task["id"]]
+        assert client.get(endpoint, params={"status": "INVALID"}).status_code == 422
+        assert client.get(endpoint, params={"priority": "INVALID"}).status_code == 422
+        assert client.get(endpoint, params={"assignee_id": "bad"}).status_code == 422
+
+        task_endpoint = f"/api/v1/tasks/{task['id']}"
+        failed_update = client.patch(
+            task_endpoint,
+            json={
+                "assignee_id": str(other_assignee_id),
+                "due_date": "2026-12-02T09:00:00+07:00",
+            },
+        )
+        assert failed_update.status_code == 409
+        unchanged = client.get(task_endpoint).json()
+        assert unchanged["assignee_id"] == str(assignee_id)
+        assert unchanged["due_date"] == task["due_date"]
+        cleared = client.patch(
+            task_endpoint, json={"assignee_id": None, "due_date": None}
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["assignee_id"] is None
+        assert cleared.json()["due_date"] is None
+        assert (
+            client.get(endpoint, params={"assignee_id": str(assignee_id)}).json() == []
+        )
+
+
 def test_validation_project_scope_and_lifespan() -> None:
     project_id = uuid4()
     other_project_id = uuid4()
@@ -147,7 +235,7 @@ def test_validation_project_scope_and_lifespan() -> None:
             client.post(
                 endpoint, json={"title": "Task", "assignee_id": str(uuid4())}
             ).status_code
-            == 422
+            == 409
         )
         assert client.post(endpoint, json={"title": None}).status_code == 422
         assert client.post(endpoint, json={"title": "x" * 201}).status_code == 422
@@ -284,3 +372,11 @@ def test_task_not_found_responses_are_documented() -> None:
 
     response = paths["/api/v1/projects/{project_id}/tasks"]["post"]["responses"]["404"]
     assert response["description"] == "Project not found"
+    for operation in (
+        paths["/api/v1/projects/{project_id}/tasks"]["post"],
+        paths["/api/v1/tasks/{task_id}"]["patch"],
+    ):
+        assert operation["responses"]["409"]["description"] == (
+            "Project is archived; Assignee must be an active workspace member"
+        )
+        assert "422" in operation["responses"]

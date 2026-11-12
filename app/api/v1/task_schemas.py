@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from app.core.constants import TASK_TITLE_MAX_LENGTH, TASK_TITLE_MIN_LENGTH
 from app.core.messages import NULL_REQUIRED_FIELD_MESSAGE
@@ -23,6 +23,8 @@ class TaskCreate(TaskPayload):
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
+    assignee_id: UUID | None = None
+    due_date: AwareDatetime | None = None
 
 
 class TaskUpdate(TaskPayload):
@@ -30,6 +32,8 @@ class TaskUpdate(TaskPayload):
     description: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
+    assignee_id: UUID | None = None
+    due_date: AwareDatetime | None = None
 
     @field_validator("title", "status", "priority", mode="before")
     @classmethod
@@ -51,4 +55,7 @@ class TaskRead(BaseModel):
     description: str | None
     status: TaskStatus
     priority: TaskPriority
+    assignee_id: UUID | None
+    due_date: datetime | None
+    created_by: UUID | None
     created_at: datetime

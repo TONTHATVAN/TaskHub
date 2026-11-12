@@ -28,6 +28,7 @@ from app.infrastructure.models import (
     WorkspaceModel,
     WorkspaceRole,
 )
+from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
 from app.infrastructure.repositories.base import BaseRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
@@ -206,6 +207,7 @@ def test_postgres_task_permissions() -> None:
 async def _exercise_task_permissions() -> None:
     project_id = uuid4()
     workspace_id = uuid4()
+    other_workspace_id = uuid4()
     role_names = ("owner", "editor", "viewer", "outsider", "admin")
     users = {
         name: UserModel(
@@ -232,7 +234,14 @@ async def _exercise_task_permissions() -> None:
                     ),
                 )
             )
+            other_workspace = WorkspaceModel(
+                id=other_workspace_id, name="Other team", owner=users["outsider"]
+            )
+            other_workspace.members.append(
+                WorkspaceMemberModel(user=users["outsider"], role=WorkspaceRole.OWNER)
+            )
             session.add_all(users.values())
+            session.add(other_workspace)
             session.add(
                 ProjectModel(id=project_id, name="Permissions", workspace=workspace)
             )
@@ -298,14 +307,125 @@ async def _exercise_task_permissions() -> None:
                     endpoint, json={"title": "Second"}, headers=headers("editor")
                 )
             ).status_code == 201
-            async with session_factory() as session:
-                await session.execute(
+
+            assigned = await client.post(
+                endpoint,
+                json={
+                    "title": "Assigned",
+                    "assignee_id": str(users["editor"].id),
+                    "priority": "HIGH",
+                    "due_date": "2026-12-01T09:00:00+07:00",
+                },
+                headers=headers("owner"),
+            )
+            assert assigned.status_code == 201
+            assigned_path = f"/api/v1/tasks/{assigned.json()['id']}"
+            assert assigned.json()["created_by"] == str(users["owner"].id)
+            assert assigned.json()["assignee_id"] == str(users["editor"].id)
+            assert (
+                datetime.fromisoformat(assigned.json()["due_date"]).utcoffset()
+                is not None
+            )
+            filtered = await client.get(
+                endpoint,
+                params={
+                    "assignee_id": str(users["editor"].id),
+                    "status": "TODO",
+                    "priority": "HIGH",
+                    "page": 1,
+                    "limit": 1,
+                },
+                headers=headers("owner"),
+            )
+            assert filtered.status_code == 200
+            assert [task["id"] for task in filtered.json()] == [assigned.json()["id"]]
+            async with (
+                session_factory() as access_session,
+                session_factory() as removing_session,
+            ):
+                access = await SqlProjectAccessRepository(
+                    access_session
+                ).get_project_access(project_id, users["editor"].id, for_update=True)
+                assert access is not None
+                assert access.member_role == WorkspaceRole.EDITOR
+                waiting_removal = asyncio.create_task(
+                    removing_session.execute(
+                        delete(WorkspaceMemberModel).where(
+                            WorkspaceMemberModel.workspace_id == workspace_id,
+                            WorkspaceMemberModel.user_id == users["editor"].id,
+                        )
+                    )
+                )
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(waiting_removal), 0.1)
+                await access_session.commit()
+                await asyncio.wait_for(waiting_removal, 3)
+                await removing_session.rollback()
+            async with (
+                session_factory() as removing_session,
+                session_factory() as assigning_session,
+            ):
+                await removing_session.execute(
                     delete(WorkspaceMemberModel).where(
                         WorkspaceMemberModel.workspace_id == workspace_id,
                         WorkspaceMemberModel.user_id == users["editor"].id,
                     )
                 )
+                waiting_assignment = asyncio.create_task(
+                    SqlTaskRepository(assigning_session).require_assignable(
+                        project_id, users["editor"].id
+                    )
+                )
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(waiting_assignment), 0.1)
+                await removing_session.rollback()
+                await asyncio.wait_for(waiting_assignment, 3)
+                await assigning_session.rollback()
+            rejected = await client.patch(
+                assigned_path,
+                json={"assignee_id": str(users["outsider"].id)},
+                headers=headers("owner"),
+            )
+            assert rejected.status_code == 409
+            assert rejected.json() == {
+                "detail": "Assignee must be an active workspace member"
+            }
+            assert (await client.get(assigned_path, headers=headers("owner"))).json()[
+                "assignee_id"
+            ] == str(users["editor"].id)
+            async with session_factory() as session:
+                await session.execute(
+                    update(UserModel)
+                    .where(UserModel.id == users["viewer"].id)
+                    .values(is_active=False)
+                )
                 await session.commit()
+            assert (
+                await client.post(
+                    endpoint,
+                    json={
+                        "title": "Inactive assignment",
+                        "assignee_id": str(users["viewer"].id),
+                    },
+                    headers=headers("owner"),
+                )
+            ).status_code == 409
+
+            removed = await client.delete(
+                f"/api/v1/workspaces/{workspace_id}/members/{users['editor'].id}",
+                headers=headers("owner"),
+            )
+            assert removed.status_code == 204
+            assert (await client.get(assigned_path, headers=headers("owner"))).json()[
+                "assignee_id"
+            ] is None
+            assert (
+                await client.patch(
+                    assigned_path,
+                    json={"assignee_id": str(users["editor"].id)},
+                    headers=headers("owner"),
+                )
+            ).status_code == 409
             assert (
                 await client.patch(
                     task_endpoint,
@@ -319,7 +439,9 @@ async def _exercise_task_permissions() -> None:
     finally:
         async with session_factory() as session:
             await session.execute(
-                delete(WorkspaceModel).where(WorkspaceModel.id == workspace_id)
+                delete(WorkspaceModel).where(
+                    WorkspaceModel.id.in_([workspace_id, other_workspace_id])
+                )
             )
             await session.execute(
                 delete(UserModel).where(

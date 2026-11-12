@@ -27,3 +27,6 @@ class Task:
     status: TaskStatus
     priority: TaskPriority
     created_at: datetime
+    assignee_id: UUID | None = None
+    due_date: datetime | None = None
+    created_by: UUID | None = None

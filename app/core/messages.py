@@ -17,6 +17,7 @@ INACTIVE_WORKSPACE_MEMBER_MESSAGE = "Inactive user cannot join workspace"
 
 NULL_REQUIRED_FIELD_MESSAGE = "This field cannot be null"
 TASK_NOT_FOUND_MESSAGE = "Task not found"
+INVALID_TASK_ASSIGNEE_MESSAGE = "Assignee must be an active workspace member"
 PROJECT_NOT_FOUND_MESSAGE = "Project not found"
 PROJECT_ARCHIVED_MESSAGE = "Project is archived"
 ACCESS_DENIED_MESSAGE = "Insufficient permissions"
