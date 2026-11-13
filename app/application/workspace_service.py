@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.domain.authorization import WorkspacePermission, WorkspacePolicy
 from app.domain.exceptions import (
     AccessDeniedError,
     InactiveWorkspaceMemberError,
@@ -8,7 +9,7 @@ from app.domain.exceptions import (
     WorkspaceMemberNotFoundError,
     WorkspaceNotFoundError,
 )
-from app.domain.user import User, UserRole
+from app.domain.user import User
 from app.domain.user_repository import UserRepository
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
 from app.domain.workspace_repository import WorkspaceRepository
@@ -22,77 +23,69 @@ class WorkspaceService:
     async def create(self, user: User, name: str) -> Workspace:
         return await self._repository.add(name, user.id)
 
-    async def get(self, user: User, workspace_id: UUID) -> Workspace:
+    async def _require(
+        self, user: User, workspace_id: UUID, permission: WorkspacePermission
+    ) -> Workspace:
         workspace = await self._repository.get(workspace_id)
         if workspace is None:
             raise WorkspaceNotFoundError
-        if (
-            user.role != UserRole.ADMIN
-            and workspace.owner_id != user.id
-            and await self._repository.get_member_role(workspace_id, user.id) is None
-        ):
+        role = None
+        manager = WorkspacePolicy(user, workspace.owner_id, None).can_manage
+        if not manager:
+            role = await self._repository.get_member_role(
+                workspace_id,
+                user.id,
+                for_update=permission is not WorkspacePermission.READ,
+            )
+        policy = WorkspacePolicy(user, workspace.owner_id, role)
+        if not policy.can_read:
+            raise WorkspaceNotFoundError
+        if permission is WorkspacePermission.WRITE and not policy.can_write:
+            raise AccessDeniedError
+        if permission is WorkspacePermission.MANAGE and not policy.can_manage:
             raise AccessDeniedError
         return workspace
 
-    async def _require_manager(self, user: User, workspace_id: UUID) -> Workspace:
-        workspace = await self._repository.get(workspace_id)
-        if workspace is None:
-            raise WorkspaceNotFoundError
-        if user.role != UserRole.ADMIN and workspace.owner_id != user.id:
-            raise AccessDeniedError
-        return workspace
+    async def require_read(self, user: User, workspace_id: UUID) -> Workspace:
+        return await self._require(user, workspace_id, WorkspacePermission.READ)
 
     async def require_write(self, user: User, workspace_id: UUID) -> Workspace:
-        workspace = await self._repository.get(workspace_id)
-        if workspace is None:
-            raise WorkspaceNotFoundError
-        if user.role == UserRole.ADMIN or workspace.owner_id == user.id:
-            return workspace
-        role = await self._repository.get_member_role(workspace_id, user.id)
-        if role not in (WorkspaceRole.OWNER, WorkspaceRole.EDITOR):
-            raise AccessDeniedError
-        return workspace
+        return await self._require(user, workspace_id, WorkspacePermission.WRITE)
 
-    async def rename(self, user: User, workspace_id: UUID, name: str) -> Workspace:
-        await self._require_manager(user, workspace_id)
-        updated = await self._repository.rename(workspace_id, name)
+    async def require_manage(self, user: User, workspace_id: UUID) -> Workspace:
+        return await self._require(user, workspace_id, WorkspacePermission.MANAGE)
+
+    async def rename(self, workspace: Workspace, name: str) -> Workspace:
+        updated = await self._repository.rename(workspace.id, name)
         if updated is None:
             raise WorkspaceNotFoundError
         return updated
 
-    async def delete(self, user: User, workspace_id: UUID) -> None:
-        await self._require_manager(user, workspace_id)
-        if not await self._repository.delete(workspace_id):
+    async def delete(self, workspace: Workspace) -> None:
+        if not await self._repository.delete(workspace.id):
             raise WorkspaceNotFoundError
 
     async def list_members(
-        self, user: User, workspace_id: UUID
-    ) -> list[WorkspaceMember]:
-        await self.get(user, workspace_id)
-        return await self._repository.list_members(workspace_id)
+        self, workspace: Workspace, *, page: int, limit: int
+    ) -> tuple[list[WorkspaceMember], int]:
+        return await self._repository.list_members(workspace.id, page=page, limit=limit)
 
     async def invite_member(
-        self, user: User, workspace_id: UUID, member_id: UUID, role: WorkspaceRole
+        self, workspace: Workspace, member_id: UUID, role: WorkspaceRole
     ) -> WorkspaceMember:
-        await self._require_manager(user, workspace_id)
-        if role is WorkspaceRole.OWNER:
-            raise AccessDeniedError
         member = await self._users.get_by_id(member_id)
         if member is None:
             raise UserNotFoundError
         if not member.is_active:
             raise InactiveWorkspaceMemberError
-        if not await self._repository.add_member(workspace_id, member_id, role):
+        if not await self._repository.add_member(workspace.id, member_id, role):
             raise WorkspaceMemberExistsError
         return WorkspaceMember(member_id, role)
 
-    async def remove_member(
-        self, user: User, workspace_id: UUID, member_id: UUID
-    ) -> None:
-        workspace = await self._require_manager(user, workspace_id)
+    async def remove_member(self, workspace: Workspace, member_id: UUID) -> None:
         if member_id == workspace.owner_id:
             raise AccessDeniedError
-        if not await self._repository.remove_member(workspace_id, member_id):
-            if await self._repository.get(workspace_id) is None:
+        if not await self._repository.remove_member(workspace.id, member_id):
+            if await self._repository.get(workspace.id) is None:
                 raise WorkspaceNotFoundError
             raise WorkspaceMemberNotFoundError

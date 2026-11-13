@@ -274,10 +274,14 @@ async def _exercise_task_permissions() -> None:
                     headers=headers("viewer"),
                 ),
                 await client.delete(task_endpoint, headers=headers("viewer")),
-                await client.get(endpoint, headers=headers("outsider")),
-                await client.get(task_endpoint, headers=headers("outsider")),
             ):
                 assert response.status_code == 403
+            assert (
+                await client.get(endpoint, headers=headers("outsider"))
+            ).status_code == 404
+            assert (
+                await client.get(task_endpoint, headers=headers("outsider"))
+            ).status_code == 404
             assert (await client.get(task_endpoint, headers=headers("owner"))).json()[
                 "title"
             ] == "Protected"
@@ -308,7 +312,7 @@ async def _exercise_task_permissions() -> None:
                     json={"title": "After removal"},
                     headers=headers("editor"),
                 )
-            ).status_code == 403
+            ).status_code == 404
             assert (
                 await client.delete(task_endpoint, headers=headers("admin"))
             ).status_code == 204
@@ -811,7 +815,7 @@ async def _exercise_database() -> None:
                 )
 
             memberships = BaseRepository(session, WorkspaceMemberModel)
-            with pytest.raises(NotFoundError):
+            with pytest.raises(ValueError, match="Entity primary key is required"):
                 await memberships.delete(workspace_id)
             member = await memberships.get((workspace_id, user_id))
             assert member is not None

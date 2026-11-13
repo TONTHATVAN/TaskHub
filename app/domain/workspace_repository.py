@@ -1,6 +1,7 @@
 from typing import Protocol
 from uuid import UUID
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
 
 
@@ -14,10 +15,16 @@ class WorkspaceRepository(Protocol):
     async def delete(self, workspace_id: UUID) -> bool: ...
 
     async def get_member_role(
-        self, workspace_id: UUID, user_id: UUID
+        self, workspace_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> WorkspaceRole | None: ...
 
-    async def list_members(self, workspace_id: UUID) -> list[WorkspaceMember]: ...
+    async def list_members(
+        self,
+        workspace_id: UUID,
+        *,
+        page: int = PAGE_DEFAULT,
+        limit: int = LIMIT_DEFAULT,
+    ) -> tuple[list[WorkspaceMember], int]: ...
 
     async def add_member(
         self, workspace_id: UUID, user_id: UUID, role: WorkspaceRole

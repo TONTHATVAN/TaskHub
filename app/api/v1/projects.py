@@ -21,11 +21,9 @@ PROJECT_WRITE_RESPONSES = PROJECT_RESPONSES | ARCHIVED_PROJECT_RESPONSES
 
 @router.get("/{project_id}", response_model=ProjectRead, responses=PROJECT_RESPONSES)
 async def get_project(
-    project_id: UUID,
-    access: ReadableProjectDep,
-    service: ProjectServiceDep,
+    project: ReadableProjectDep,
 ) -> Project:
-    return await service.get(project_id)
+    return project
 
 
 @router.patch(
@@ -34,10 +32,11 @@ async def get_project(
 async def update_project(
     project_id: UUID,
     payload: ProjectUpdate,
-    access: WritableProjectDep,
+    project: WritableProjectDep,
     service: ProjectServiceDep,
 ) -> Project:
-    return await service.update(project_id, payload.to_changes())
+    changes = payload.to_changes()
+    return await service.update(project.id, changes) if changes else project
 
 
 @router.post(
@@ -45,10 +44,20 @@ async def update_project(
 )
 async def archive_project(
     project_id: UUID,
-    access: WritableArchivedProjectDep,
+    project: WritableArchivedProjectDep,
     service: ProjectServiceDep,
 ) -> Project:
-    return await service.archive(project_id)
+    return await service.archive(project.id)
+
+
+@router.post(
+    "/{project_id}/unarchive", response_model=ProjectRead, responses=PROJECT_RESPONSES
+)
+async def unarchive_project(
+    project: WritableArchivedProjectDep,
+    service: ProjectServiceDep,
+) -> Project:
+    return await service.unarchive(project.id)
 
 
 @router.delete(
@@ -56,8 +65,8 @@ async def archive_project(
 )
 async def delete_project(
     project_id: UUID,
-    access: WritableArchivedProjectDep,
+    project: WritableArchivedProjectDep,
     service: ProjectServiceDep,
 ) -> Response:
-    await service.delete(project_id)
+    await service.delete(project.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

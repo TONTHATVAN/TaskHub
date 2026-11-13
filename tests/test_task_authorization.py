@@ -9,6 +9,7 @@ from app.api.dependencies import (
     get_task_repository,
 )
 from app.domain.authorization import ProjectAccess
+from app.domain.project import Project, ProjectStatus
 from app.domain.user import User, UserRole
 from app.domain.workspace import WorkspaceRole
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
@@ -38,7 +39,18 @@ class MemoryProjectAccessRepository:
     ) -> ProjectAccess | None:
         if project_id != self.project_id:
             return None
-        return ProjectAccess(self.owner_id, self.members.get(user_id))
+        return ProjectAccess(
+            self.owner_id,
+            self.members.get(user_id),
+            Project(
+                project_id,
+                uuid4(),
+                "Test project",
+                None,
+                ProjectStatus.ACTIVE,
+                datetime.now(UTC),
+            ),
+        )
 
 
 def test_task_permissions_follow_workspace_roles() -> None:
@@ -78,9 +90,9 @@ def test_task_permissions_follow_workspace_roles() -> None:
         assert client.get(task_endpoint).json()["title"] == "Protected"
 
         current[0] = outsider
-        assert client.get(endpoint).status_code == 403
-        assert client.get(task_endpoint).status_code == 403
-        assert client.post(endpoint, json={"title": "Denied"}).status_code == 403
+        assert client.get(endpoint).status_code == 404
+        assert client.get(task_endpoint).status_code == 404
+        assert client.post(endpoint, json={"title": "Denied"}).status_code == 404
 
         current[0] = editor
         assert client.patch(task_endpoint, json={"title": "Edited"}).status_code == 200

@@ -36,6 +36,7 @@ from app.main import create_app
 class MemoryProjectRepository:
     def __init__(self) -> None:
         self.projects: dict[UUID, Project] = {}
+        self.get_calls = 0
 
     async def add(
         self, workspace_id: UUID, name: str, description: str | None
@@ -52,16 +53,17 @@ class MemoryProjectRepository:
         return project
 
     async def get(self, project_id: UUID) -> Project | None:
+        self.get_calls += 1
         return self.projects.get(project_id)
 
     async def list_by_workspace(
         self, workspace_id: UUID, *, page: int = 1, limit: int = 20
-    ) -> list[Project]:
+    ) -> tuple[list[Project], int]:
         projects = sorted(
             (p for p in self.projects.values() if p.workspace_id == workspace_id),
             key=lambda p: (p.created_at, p.id),
         )
-        return projects[(page - 1) * limit : page * limit]
+        return projects[(page - 1) * limit : page * limit], len(projects)
 
     async def save(self, project_id: UUID, changes: ProjectChanges) -> Project | None:
         project = self.projects.get(project_id)
@@ -92,7 +94,7 @@ class MemoryProjectAccessRepository:
         if workspace is None:
             return None
         role = self.workspaces.members.get((workspace.id, user_id))
-        return ProjectAccess(workspace.owner_id, role, project.status)
+        return ProjectAccess(workspace.owner_id, role, project)
 
 
 def test_project_crud_archive_and_role_permissions() -> None:
@@ -136,7 +138,11 @@ def test_project_crud_archive_and_role_permissions() -> None:
         assert created.json()["status"] == "ACTIVE"
         project = f"/api/v1/projects/{created.json()['id']}"
         assert client.get(project).status_code == 200
-        assert len(client.get(collection).json()) == 1
+        assert projects.get_calls == 0
+        assert client.patch(project, json={}).status_code == 200
+        assert projects.get_calls == 0
+        assert client.get(collection).json()["total"] == 1
+        assert len(client.get(collection).json()["items"]) == 1
         assert client.get(f"{collection}?page=0").status_code == 422
         assert client.get(f"{collection}?limit=101").status_code == 422
         assert client.patch(project, json={"name": None}).status_code == 422
@@ -157,10 +163,14 @@ def test_project_crud_archive_and_role_permissions() -> None:
         assert client.delete(project).status_code == 403
 
         current[0] = outsider
-        assert client.get(collection).status_code == 403
-        assert client.get(project).status_code == 403
+        assert client.get(collection).status_code == 404
+        assert client.get(project).status_code == 404
         current[0] = editor
         assert client.post(collection, json={"name": "Project B"}).status_code == 201
+        first_page = client.get(collection, params={"page": 1, "limit": 1}).json()
+        second_page = client.get(collection, params={"page": 2, "limit": 1}).json()
+        assert first_page["total"] == second_page["total"] == 2
+        assert first_page["items"][0]["id"] != second_page["items"][0]["id"]
         assert client.patch(project, json={"name": "Edited"}).json()["name"] == "Edited"
         archived = client.post(f"{project}/archive")
         assert archived.status_code == 200
@@ -170,7 +180,10 @@ def test_project_crud_archive_and_role_permissions() -> None:
         blocked_task = client.post(f"{project}/tasks", json={"title": "Blocked"})
         assert blocked_task.status_code == 409
         assert blocked_task.json() == {"detail": "Project is archived"}
-        assert client.get(project).json()["name"] == "Edited"
+        assert client.post(f"{project}/unarchive").json()["status"] == "ACTIVE"
+        assert client.patch(project, json={"name": "Available"}).status_code == 200
+        assert client.post(f"{project}/archive").status_code == 200
+        assert client.get(project).json()["name"] == "Available"
         assert client.delete(project).status_code == 204
         assert client.get(project).status_code == 404
 
@@ -191,6 +204,7 @@ def test_project_routes_document_authorization_errors() -> None:
         ("/api/v1/projects/{project_id}", "patch"),
         ("/api/v1/projects/{project_id}", "delete"),
         ("/api/v1/projects/{project_id}/archive", "post"),
+        ("/api/v1/projects/{project_id}/unarchive", "post"),
     ):
         operation = paths[path][method]
         assert "HTTPBearer" in operation["security"][0]
@@ -309,9 +323,15 @@ async def _exercise_project_postgres() -> None:
             assert created.status_code == 201
             project_id = UUID(created.json()["id"])
             project = f"/api/v1/projects/{project_id}"
+            page = await client.get(
+                collection, params={"page": 1, "limit": 1}, headers=owner_headers
+            )
+            assert page.status_code == 200
+            assert page.json()["total"] == 1
+            assert page.json()["items"][0]["id"] == str(project_id)
             assert (
                 await client.get(project, headers=viewer_headers)
-            ).status_code == 403
+            ).status_code == 404
             assert (
                 await client.post(
                     f"/api/v1/workspaces/{workspace_id}/members",
@@ -360,6 +380,16 @@ async def _exercise_project_postgres() -> None:
                     headers=owner_headers,
                 )
             ).status_code == 409
+            restored = await client.post(f"{project}/unarchive", headers=owner_headers)
+            assert restored.status_code == 200
+            assert restored.json()["status"] == "ACTIVE"
+            assert (
+                await client.post(
+                    f"{project}/tasks",
+                    json={"title": "Available again"},
+                    headers=owner_headers,
+                )
+            ).status_code == 201
             assert (
                 await client.get(f"/api/v1/tasks/{task_id}", headers=owner_headers)
             ).status_code == 200

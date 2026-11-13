@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,7 +55,12 @@ class SqlProjectRepository:
         *,
         page: int = PAGE_DEFAULT,
         limit: int = LIMIT_DEFAULT,
-    ) -> list[Project]:
+    ) -> tuple[list[Project], int]:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(ProjectModel)
+            .where(ProjectModel.workspace_id == workspace_id)
+        )
         models = await self._session.scalars(
             select(ProjectModel)
             .where(ProjectModel.workspace_id == workspace_id)
@@ -63,7 +68,7 @@ class SqlProjectRepository:
             .offset((page - 1) * limit)
             .limit(limit)
         )
-        return [self._to_domain(model) for model in models]
+        return [self._to_domain(model) for model in models], total or 0
 
     async def save(self, project_id: UUID, changes: ProjectChanges) -> Project | None:
         result = await self._session.execute(

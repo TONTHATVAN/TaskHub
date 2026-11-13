@@ -14,7 +14,8 @@ from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
-from app.domain.authorization import ProjectAccess, ProjectAccessRepository
+from app.domain.authorization import ProjectAccessRepository
+from app.domain.project import Project
 from app.domain.project_repository import ProjectRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task import Task
@@ -177,34 +178,42 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 async def get_readable_project(
     project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
-) -> ProjectAccess:
-    return await authorization.require_project(user, project_id, write=False)
+) -> Project:
+    return (await authorization.require_project(user, project_id, write=False)).project
 
 
 async def get_writable_project(
     project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
-) -> ProjectAccess:
-    return await authorization.require_project(user, project_id, write=True)
+) -> Project:
+    return (await authorization.require_project(user, project_id, write=True)).project
 
 
 async def get_writable_archived_project(
     project_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
-) -> ProjectAccess:
-    return await authorization.require_project(
-        user, project_id, write=True, allow_archived=True
-    )
+) -> Project:
+    return (
+        await authorization.require_project(
+            user, project_id, write=True, allow_archived=True
+        )
+    ).project
 
 
 async def get_readable_workspace(
     workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
 ) -> Workspace:
-    return await service.get(user, workspace_id)
+    return await service.require_read(user, workspace_id)
 
 
 async def get_writable_workspace(
     workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
 ) -> Workspace:
     return await service.require_write(user, workspace_id)
+
+
+async def get_manageable_workspace(
+    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
+) -> Workspace:
+    return await service.require_manage(user, workspace_id)
 
 
 async def get_readable_task(
@@ -219,12 +228,11 @@ async def get_writable_task(
     return await authorization.require_task(user, task_id, write=True)
 
 
-ReadableProjectDep = Annotated[ProjectAccess, Depends(get_readable_project)]
-WritableProjectDep = Annotated[ProjectAccess, Depends(get_writable_project)]
-WritableArchivedProjectDep = Annotated[
-    ProjectAccess, Depends(get_writable_archived_project)
-]
+ReadableProjectDep = Annotated[Project, Depends(get_readable_project)]
+WritableProjectDep = Annotated[Project, Depends(get_writable_project)]
+WritableArchivedProjectDep = Annotated[Project, Depends(get_writable_archived_project)]
 ReadableWorkspaceDep = Annotated[Workspace, Depends(get_readable_workspace)]
 WritableWorkspaceDep = Annotated[Workspace, Depends(get_writable_workspace)]
+ManageableWorkspaceDep = Annotated[Workspace, Depends(get_manageable_workspace)]
 ReadableTaskDep = Annotated[Task, Depends(get_readable_task)]
 WritableTaskDep = Annotated[Task, Depends(get_writable_task)]

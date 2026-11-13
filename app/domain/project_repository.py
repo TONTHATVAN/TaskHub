@@ -24,7 +24,7 @@ class ProjectRepository(Protocol):
         *,
         page: int = PAGE_DEFAULT,
         limit: int = LIMIT_DEFAULT,
-    ) -> list[Project]: ...
+    ) -> tuple[list[Project], int]: ...
 
     async def save(
         self, project_id: UUID, changes: ProjectChanges

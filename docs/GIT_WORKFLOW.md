@@ -62,6 +62,8 @@ Thay tên nhánh và nội dung commit cho đúng công việc thực tế. Khô
 
 ## 4. Pull Request và cập nhật local
 
+Trước khi mở PR hoặc cập nhật nhánh theo review, đối chiếu [quy tắc phạm vi PR và rebase](QUY_TAC_PR_VA_REBASE.md), đặc biệt khi nhánh đã push hoặc có PR phụ thuộc.
+
 1. Trên GitHub, tạo Pull Request từ nhánh làm việc vào `main`.
 2. Trong Pull Request, mô tả thay đổi, cách kiểm tra và lưu ý liên quan; xem lại diff, chờ kiểm tra và review theo quy định của nhóm.
 3. Sau khi Pull Request được duyệt, merge trên GitHub vào `main`. Xóa nhánh remote sau merge nếu không còn dùng.

@@ -74,16 +74,20 @@ class MemoryWorkspaceRepository:
         return True
 
     async def get_member_role(
-        self, workspace_id: UUID, user_id: UUID
+        self, workspace_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> WorkspaceRole | None:
         return self.members.get((workspace_id, user_id))
 
-    async def list_members(self, workspace_id: UUID) -> list[WorkspaceMember]:
-        return [
+    async def list_members(
+        self, workspace_id: UUID, *, page: int = 1, limit: int = 20
+    ) -> tuple[list[WorkspaceMember], int]:
+        items = [
             WorkspaceMember(user_id, role)
             for (stored_workspace_id, user_id), role in self.members.items()
             if stored_workspace_id == workspace_id
         ]
+        items.sort(key=lambda member: member.user_id)
+        return items[(page - 1) * limit : page * limit], len(items)
 
     async def add_member(
         self, workspace_id: UUID, user_id: UUID, role: WorkspaceRole
@@ -114,7 +118,7 @@ def test_removed_workspace_reports_workspace_not_found() -> None:
         workspace = await repository.add("Team", owner.id)
         service = WorkspaceService(repository, MemoryUserRepository())
         with pytest.raises(WorkspaceNotFoundError):
-            await service.remove_member(owner, workspace.id, member.id)
+            await service.remove_member(workspace, member.id)
 
     asyncio.run(exercise())
 
@@ -157,8 +161,8 @@ def test_workspace_crud_validation_and_owner_permissions() -> None:
             client.patch(endpoint, json={"name": "Denied"}),
             client.delete(endpoint),
         ):
-            assert response.status_code == 403
-            assert response.json() == {"detail": "Insufficient permissions"}
+            assert response.status_code == 404
+            assert response.json() == {"detail": "Workspace not found"}
 
         current[0] = admin
         assert client.get(endpoint).status_code == 200
@@ -236,11 +240,19 @@ def test_workspace_members_and_role_boundaries() -> None:
             ).status_code
             == 201
         )
-        assert {row["user_id"] for row in client.get(members).json()} == {
+        member_page = client.get(members).json()
+        assert member_page["total"] == 3
+        assert {row["user_id"] for row in member_page["items"]} == {
             str(owner.id),
             str(editor.id),
             str(viewer.id),
         }
+        assert (
+            client.get(members, params={"page": 2, "limit": 2}).json()["items"]
+            == member_page["items"][2:]
+        )
+        assert client.get(members, params={"page": 0}).status_code == 422
+        assert client.get(members, params={"limit": 101}).status_code == 422
 
         for member in (editor, viewer):
             current[0] = member
@@ -257,8 +269,8 @@ def test_workspace_members_and_role_boundaries() -> None:
             assert client.delete(f"{members}/{editor.id}").status_code == 403
 
         current[0] = outsider
-        assert client.get(workspace).status_code == 403
-        assert client.get(members).status_code == 403
+        assert client.get(workspace).status_code == 404
+        assert client.get(members).status_code == 404
 
         current[0] = owner
         assert client.delete(f"{members}/{owner.id}").status_code == 403
@@ -266,7 +278,7 @@ def test_workspace_members_and_role_boundaries() -> None:
         assert client.delete(f"{members}/{editor.id}").status_code == 204
         assert client.delete(f"{members}/{editor.id}").status_code == 404
         current[0] = editor
-        assert client.get(workspace).status_code == 403
+        assert client.get(workspace).status_code == 404
         current[0] = admin
         assert client.get(members).status_code == 200
         assert client.delete(f"{members}/{viewer.id}").status_code == 204
@@ -413,18 +425,26 @@ async def _exercise_workspace_postgres() -> None:
 
             assert (
                 await client.get(endpoint, headers=other_headers)
-            ).status_code == 403
+            ).status_code == 404
             assert (
                 await client.patch(
                     endpoint, json={"name": "Denied"}, headers=other_headers
                 )
-            ).status_code == 403
+            ).status_code == 404
             invited = await client.post(
                 members_endpoint,
                 json={"user_id": str(other_id), "role": "VIEWER"},
                 headers=owner_headers,
             )
             assert invited.status_code == 201
+            page = await client.get(
+                members_endpoint,
+                params={"page": 2, "limit": 1},
+                headers=owner_headers,
+            )
+            assert page.status_code == 200
+            assert page.json()["total"] == 2
+            assert len(page.json()["items"]) == 1
             assert (
                 await client.post(
                     members_endpoint,
@@ -458,7 +478,7 @@ async def _exercise_workspace_postgres() -> None:
             ).status_code == 204
             assert (
                 await client.get(endpoint, headers=other_headers)
-            ).status_code == 403
+            ).status_code == 404
             renamed = await client.patch(
                 endpoint, json={"name": "Renamed"}, headers=owner_headers
             )

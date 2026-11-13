@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, Response, status
 
 from app.api.dependencies import (
     CurrentUserDep,
+    ManageableWorkspaceDep,
     ProjectServiceDep,
     ReadableWorkspaceDep,
     WorkspaceServiceDep,
@@ -15,6 +16,7 @@ from app.api.v1.error_responses import (
     WORKSPACE_RESPONSES,
     error_response,
 )
+from app.api.v1.pagination_schemas import PageRead
 from app.api.v1.project_schemas import ProjectCreate, ProjectRead
 from app.api.v1.workspace_schemas import (
     WorkspaceCreate,
@@ -72,21 +74,20 @@ async def create_workspace(
     "/{workspace_id}", response_model=WorkspaceRead, responses=WORKSPACE_RESPONSES
 )
 async def get_workspace(
-    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
+    workspace: ReadableWorkspaceDep,
 ) -> Workspace:
-    return await service.get(user, workspace_id)
+    return workspace
 
 
 @router.patch(
     "/{workspace_id}", response_model=WorkspaceRead, responses=WORKSPACE_RESPONSES
 )
 async def update_workspace(
-    workspace_id: UUID,
+    workspace: ManageableWorkspaceDep,
     payload: WorkspaceUpdate,
-    user: CurrentUserDep,
     service: WorkspaceServiceDep,
 ) -> Workspace:
-    return await service.rename(user, workspace_id, payload.name)
+    return await service.rename(workspace, payload.name)
 
 
 @router.delete(
@@ -95,21 +96,25 @@ async def update_workspace(
     responses=WORKSPACE_RESPONSES,
 )
 async def delete_workspace(
-    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
+    workspace: ManageableWorkspaceDep, service: WorkspaceServiceDep
 ) -> Response:
-    await service.delete(user, workspace_id)
+    await service.delete(workspace)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
     "/{workspace_id}/members",
-    response_model=list[WorkspaceMemberRead],
+    response_model=PageRead[WorkspaceMemberRead],
     responses=WORKSPACE_RESPONSES,
 )
 async def list_workspace_members(
-    workspace_id: UUID, user: CurrentUserDep, service: WorkspaceServiceDep
-) -> list[WorkspaceMember]:
-    return await service.list_members(user, workspace_id)
+    workspace: ReadableWorkspaceDep,
+    service: WorkspaceServiceDep,
+    page: Annotated[int, Query(ge=PAGE_MIN)] = PAGE_DEFAULT,
+    limit: Annotated[int, Query(ge=LIMIT_MIN, le=LIMIT_MAX)] = LIMIT_DEFAULT,
+) -> dict[str, object]:
+    items, total = await service.list_members(workspace, page=page, limit=limit)
+    return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 @router.post(
@@ -119,14 +124,11 @@ async def list_workspace_members(
     responses=MEMBER_INVITE_RESPONSES,
 )
 async def invite_workspace_member(
-    workspace_id: UUID,
+    workspace: ManageableWorkspaceDep,
     payload: WorkspaceMemberInvite,
-    user: CurrentUserDep,
     service: WorkspaceServiceDep,
 ) -> WorkspaceMember:
-    return await service.invite_member(
-        user, workspace_id, payload.user_id, payload.role
-    )
+    return await service.invite_member(workspace, payload.user_id, payload.role)
 
 
 @router.delete(
@@ -135,12 +137,11 @@ async def invite_workspace_member(
     responses=MEMBER_REMOVE_RESPONSES,
 )
 async def remove_workspace_member(
-    workspace_id: UUID,
+    workspace: ManageableWorkspaceDep,
     member_id: UUID,
-    user: CurrentUserDep,
     service: WorkspaceServiceDep,
 ) -> Response:
-    await service.remove_member(user, workspace_id, member_id)
+    await service.remove_member(workspace, member_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -160,7 +161,7 @@ async def create_project(
 
 @router.get(
     "/{workspace_id}/projects",
-    response_model=list[ProjectRead],
+    response_model=PageRead[ProjectRead],
     responses=WORKSPACE_RESPONSES,
 )
 async def list_projects(
@@ -168,5 +169,8 @@ async def list_projects(
     projects: ProjectServiceDep,
     page: Annotated[int, Query(ge=PAGE_MIN)] = PAGE_DEFAULT,
     limit: Annotated[int, Query(ge=LIMIT_MIN, le=LIMIT_MAX)] = LIMIT_DEFAULT,
-) -> list[Project]:
-    return await projects.list_by_workspace(workspace.id, page=page, limit=limit)
+) -> dict[str, object]:
+    items, total = await projects.list_by_workspace(
+        workspace.id, page=page, limit=limit
+    )
+    return {"items": items, "total": total, "page": page, "limit": limit}

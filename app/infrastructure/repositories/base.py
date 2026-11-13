@@ -11,7 +11,11 @@ from app.core.constants import (
     PAGE_DEFAULT,
     PAGE_MIN,
 )
-from app.core.messages import PAGINATION_OUT_OF_RANGE_MESSAGE
+from app.core.messages import (
+    ENTITY_NOT_FOUND_TEMPLATE,
+    ENTITY_PRIMARY_KEY_REQUIRED_MESSAGE,
+    PAGINATION_OUT_OF_RANGE_MESSAGE,
+)
 from app.domain.exceptions import NotFoundError
 from app.infrastructure.models import Base
 
@@ -29,7 +33,7 @@ class BaseRepository(Generic[ModelT]):
         if len(values) != len(inspect(self.model).primary_key) or any(
             value is None for value in values
         ):
-            raise NotFoundError(f"{self.model.__name__} primary key is required")
+            raise ValueError(ENTITY_PRIMARY_KEY_REQUIRED_MESSAGE)
         return values
 
     async def add(self, entity: ModelT) -> ModelT:
@@ -59,7 +63,7 @@ class BaseRepository(Generic[ModelT]):
         key_columns = inspect(self.model).primary_key
         key_values = tuple(getattr(entity, column.name) for column in key_columns)
         if any(value is None for value in key_values):
-            raise NotFoundError(f"{self.model.__name__} primary key is required")
+            raise ValueError(ENTITY_PRIMARY_KEY_REQUIRED_MESSAGE)
 
         state = inspect(entity)
         values = {
@@ -86,7 +90,9 @@ class BaseRepository(Generic[ModelT]):
                 await self.session.execute(select(*key_columns).where(*predicate))
             ).first() is not None
         if not found:
-            raise NotFoundError(f"{self.model.__name__} not found")
+            raise NotFoundError(
+                ENTITY_NOT_FOUND_TEMPLATE.format(entity=self.model.__name__)
+            )
         entity_id = key_values[0] if len(key_values) == 1 else key_values
         saved = await self.get(entity_id)
         assert saved is not None

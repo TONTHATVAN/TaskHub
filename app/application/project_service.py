@@ -27,7 +27,7 @@ class ProjectService:
         *,
         page: int = PAGE_DEFAULT,
         limit: int = LIMIT_DEFAULT,
-    ) -> list[Project]:
+    ) -> tuple[list[Project], int]:
         return await self._repository.list_by_workspace(
             workspace_id, page=page, limit=limit
         )
@@ -42,6 +42,9 @@ class ProjectService:
 
     async def archive(self, project_id: UUID) -> Project:
         return await self.update(project_id, {"status": ProjectStatus.ARCHIVED})
+
+    async def unarchive(self, project_id: UUID) -> Project:
+        return await self.update(project_id, {"status": ProjectStatus.ACTIVE})
 
     async def delete(self, project_id: UUID) -> None:
         if not await self._repository.delete(project_id):

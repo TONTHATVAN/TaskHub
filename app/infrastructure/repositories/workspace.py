@@ -1,10 +1,11 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import UserNotFoundError, WorkspaceNotFoundError
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
 from app.infrastructure.models import UserModel, WorkspaceMemberModel, WorkspaceModel
@@ -59,22 +60,36 @@ class SqlWorkspaceRepository:
         return result.scalar_one_or_none() is not None
 
     async def get_member_role(
-        self, workspace_id: UUID, user_id: UUID
+        self, workspace_id: UUID, user_id: UUID, *, for_update: bool = False
     ) -> WorkspaceRole | None:
-        return await self._session.scalar(
-            select(WorkspaceMemberModel.role).where(
-                WorkspaceMemberModel.workspace_id == workspace_id,
-                WorkspaceMemberModel.user_id == user_id,
-            )
+        statement = select(WorkspaceMemberModel.role).where(
+            WorkspaceMemberModel.workspace_id == workspace_id,
+            WorkspaceMemberModel.user_id == user_id,
         )
+        if for_update:
+            statement = statement.with_for_update(read=True, of=WorkspaceMemberModel)
+        return await self._session.scalar(statement)
 
-    async def list_members(self, workspace_id: UUID) -> list[WorkspaceMember]:
+    async def list_members(
+        self,
+        workspace_id: UUID,
+        *,
+        page: int = PAGE_DEFAULT,
+        limit: int = LIMIT_DEFAULT,
+    ) -> tuple[list[WorkspaceMember], int]:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(WorkspaceMemberModel)
+            .where(WorkspaceMemberModel.workspace_id == workspace_id)
+        )
         rows = await self._session.execute(
             select(WorkspaceMemberModel.user_id, WorkspaceMemberModel.role)
             .where(WorkspaceMemberModel.workspace_id == workspace_id)
             .order_by(WorkspaceMemberModel.user_id)
+            .offset((page - 1) * limit)
+            .limit(limit)
         )
-        return [WorkspaceMember(row.user_id, row.role) for row in rows]
+        return [WorkspaceMember(row.user_id, row.role) for row in rows], total or 0
 
     async def add_member(
         self, workspace_id: UUID, user_id: UUID, role: WorkspaceRole
