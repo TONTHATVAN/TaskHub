@@ -65,6 +65,7 @@ def test_profile_update_and_password_change() -> None:
 
         for payload in (
             {"email": None},
+            {"role": "ADMIN"},
             {"full_name": None},
             {"full_name": "  "},
             {"full_name": "x" * 201},
@@ -168,12 +169,11 @@ def test_profile_update_and_password_change() -> None:
             == 401
         )
         for refresh_token in (old_refresh_token, second_refresh_token):
-            assert (
-                client.post(
-                    "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
-                ).status_code
-                == 401
+            revoked_refresh = client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
             )
+            assert revoked_refresh.status_code == 401
+            assert revoked_refresh.headers["WWW-Authenticate"] == "Bearer"
         assert (
             client.post(
                 "/api/v1/auth/login",

@@ -1,6 +1,7 @@
-from fastapi import HTTPException, status
+from http import HTTPStatus
 
-from app.core.constants import BEARER_SCHEME
+from app.core.constants import BEARER_SCHEME, WWW_AUTHENTICATE_HEADER
+from app.core.exceptions import AppException
 from app.core.messages import (
     CURRENT_PASSWORD_INCORRECT_MESSAGE,
     EMAIL_ALREADY_REGISTERED_MESSAGE,
@@ -10,28 +11,28 @@ from app.core.messages import (
 )
 
 
-class EmailAlreadyRegisteredException(HTTPException):
+class EmailAlreadyRegisteredException(AppException):
     def __init__(self) -> None:
         super().__init__(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=EMAIL_ALREADY_REGISTERED_MESSAGE,
+            EMAIL_ALREADY_REGISTERED_MESSAGE,
+            HTTPStatus.CONFLICT,
         )
 
 
-class IncorrectCurrentPasswordException(HTTPException):
+class IncorrectCurrentPasswordException(AppException):
     def __init__(self) -> None:
         super().__init__(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=CURRENT_PASSWORD_INCORRECT_MESSAGE,
+            CURRENT_PASSWORD_INCORRECT_MESSAGE,
+            HTTPStatus.BAD_REQUEST,
         )
 
 
-class UnauthorizedException(HTTPException):
+class UnauthorizedException(AppException):
     def __init__(self, detail: str = INVALID_ACCESS_TOKEN_MESSAGE) -> None:
         super().__init__(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=detail,
-            headers={"WWW-Authenticate": BEARER_SCHEME},
+            detail,
+            HTTPStatus.UNAUTHORIZED,
+            {WWW_AUTHENTICATE_HEADER: BEARER_SCHEME},
         )
 
 

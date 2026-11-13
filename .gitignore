@@ -9,3 +9,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Ghi chú review cá nhân, không đưa lên GitHub
+/local_reviews/

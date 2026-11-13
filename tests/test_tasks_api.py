@@ -11,6 +11,7 @@ from app.api.dependencies import (
 )
 from app.domain.authorization import ProjectAccess
 from app.domain.exceptions import NotFoundError, ProjectNotFoundError, TaskNotFoundError
+from app.domain.project import Project, ProjectStatus
 from app.domain.task import Task
 from app.domain.user import User, UserRole
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
@@ -43,7 +44,18 @@ class AllowTaskAccess:
     async def require_project(
         self, user: User, project_id: UUID, *, write: bool
     ) -> ProjectAccess:
-        return ProjectAccess(owner_id=user.id, member_role=None)
+        return ProjectAccess(
+            owner_id=user.id,
+            member_role=None,
+            project=Project(
+                project_id,
+                uuid4(),
+                "Test project",
+                None,
+                ProjectStatus.ACTIVE,
+                datetime.now(UTC),
+            ),
+        )
 
     async def require_task(self, user: User, task_id: UUID, *, write: bool) -> Task:
         task = await self.repository.get(task_id)
@@ -131,6 +143,12 @@ def test_validation_project_scope_and_lifespan() -> None:
     with TestClient(app) as client:
         endpoint = f"/api/v1/projects/{project_id}/tasks"
         assert client.post(endpoint, json={"title": "   "}).status_code == 422
+        assert (
+            client.post(
+                endpoint, json={"title": "Task", "assignee_id": str(uuid4())}
+            ).status_code
+            == 422
+        )
         assert client.post(endpoint, json={"title": None}).status_code == 422
         assert client.post(endpoint, json={"title": "x" * 201}).status_code == 422
         assert (

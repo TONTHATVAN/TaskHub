@@ -16,6 +16,7 @@ from app.application.passwords import verify_password
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.core.constants import JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER
 from app.core.messages import PASSWORD_TOO_LONG_MESSAGE
+from app.domain.refresh_token_repository import RefreshConsumeResult
 from app.domain.user import User, UserRole
 from app.domain.user_repository import (
     EmailAlreadyExistsError,
@@ -31,6 +32,9 @@ class MemoryUserRepository:
 
     async def get_by_email(self, email: str) -> User | None:
         return self.users.get(email)
+
+    async def get_by_email_for_update(self, email: str) -> User | None:
+        return await self.get_by_email(email)
 
     async def get_by_id(self, user_id: UUID) -> User | None:
         return next((user for user in self.users.values() if user.id == user_id), None)
@@ -64,32 +68,43 @@ class MemoryUserRepository:
         self.users[email] = updated
         return updated
 
-    async def update_password(self, user_id: UUID, hashed_password: str) -> None:
+    async def update_password(
+        self, user_id: UUID, expected_hash: str, hashed_password: str
+    ) -> bool:
         user = await self.get_by_id(user_id)
         assert user is not None
+        if user.hashed_password != expected_hash:
+            return False
         self.users[user.email] = replace(user, hashed_password=hashed_password)
+        return True
 
 
 class MemoryRefreshTokenRepository:
     def __init__(self) -> None:
-        self.tokens: dict[UUID, tuple[UUID, datetime]] = {}
+        self.tokens: dict[UUID, tuple[UUID, datetime, datetime | None]] = {}
 
     async def add(self, token_id: UUID, user_id: UUID, expires_at: datetime) -> None:
-        self.tokens[token_id] = (user_id, expires_at)
+        self.tokens[token_id] = (user_id, expires_at, None)
 
-    async def consume(self, token_id: UUID, user_id: UUID, now: datetime) -> bool:
+    async def consume(
+        self, token_id: UUID, user_id: UUID, now: datetime
+    ) -> RefreshConsumeResult:
         stored = self.tokens.get(token_id)
-        if stored is None or stored[0] != user_id or stored[1] <= now:
-            return False
-        del self.tokens[token_id]
-        return True
+        if stored is None or stored[0] != user_id:
+            return RefreshConsumeResult.INVALID
+        if stored[2] is not None:
+            return RefreshConsumeResult.REPLAYED
+        if stored[1] <= now:
+            return RefreshConsumeResult.INVALID
+        self.tokens[token_id] = (user_id, stored[1], now)
+        return RefreshConsumeResult.CONSUMED
 
     async def revoke_all(self, user_id: UUID, now: datetime) -> None:
-        self.tokens = {
-            token_id: token
-            for token_id, token in self.tokens.items()
-            if token[0] != user_id
-        }
+        for token_id, (stored_user_id, expires_at, revoked_at) in list(
+            self.tokens.items()
+        ):
+            if stored_user_id == user_id and revoked_at is None:
+                self.tokens[token_id] = (stored_user_id, expires_at, now)
 
 
 def test_register_hashes_password_and_rejects_duplicate() -> None:
@@ -133,6 +148,16 @@ def test_register_validates_password_and_email() -> None:
     app.dependency_overrides[get_user_repository] = lambda: MemoryUserRepository()
 
     with TestClient(app) as client:
+        role_override = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "user@example.com",
+                "full_name": "User",
+                "password": "secure-pass-123",
+                "role": "ADMIN",
+            },
+        )
+        assert role_override.status_code == 422
         for email, password in [
             ("invalid", "secure-pass-123"),
             (f"{'a' * 310}@example.com", "secure-pass-123"),
@@ -204,6 +229,15 @@ def test_token_types_and_jwt_settings() -> None:
         issuer=JWT_ISSUER,
     )
     assert payload["type"] == TokenType.ACCESS
+    assert "iat" in payload
+    assert UUID(payload["jti"]) == tokens.decode(access, TokenType.ACCESS).token_id
+    malformed_subject = jwt.encode(
+        {**payload, "sub": "not-a-uuid"},
+        "test-secret" * 4,
+        algorithm=JWT_ALGORITHM,
+    )
+    with pytest.raises(InvalidTokenError):
+        tokens.decode(malformed_subject, TokenType.ACCESS)
 
 
 def test_login_refresh_logout_and_profile() -> None:
@@ -284,13 +318,6 @@ def test_login_refresh_logout_and_profile() -> None:
         )
         assert consumed_refresh.status_code == 401
         assert consumed_refresh.headers["WWW-Authenticate"] == "Bearer"
-
-        assert (
-            client.post(
-                "/api/v1/auth/logout", json={"refresh_token": new_pair["refresh_token"]}
-            ).status_code
-            == 204
-        )
         assert (
             client.post(
                 "/api/v1/auth/refresh",
@@ -298,8 +325,30 @@ def test_login_refresh_logout_and_profile() -> None:
             ).status_code
             == 401
         )
+
+        fresh_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "secret-pass"},
+        )
+        assert fresh_login.status_code == 200
+        logout_pair = fresh_login.json()
+
+        assert (
+            client.post(
+                "/api/v1/auth/logout",
+                json={"refresh_token": logout_pair["refresh_token"]},
+            ).status_code
+            == 204
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": logout_pair["refresh_token"]},
+            ).status_code
+            == 401
+        )
         invalid_logout = client.post(
-            "/api/v1/auth/logout", json={"refresh_token": new_pair["refresh_token"]}
+            "/api/v1/auth/logout", json={"refresh_token": logout_pair["refresh_token"]}
         )
         assert invalid_logout.status_code == 401
         assert invalid_logout.headers["WWW-Authenticate"] == "Bearer"
@@ -347,6 +396,12 @@ def test_login_refresh_logout_and_profile() -> None:
         )
         assert inactive_login.status_code == 401
         assert inactive_login.json() == {"detail": "Inactive user"}
+        inactive_wrong_password = client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "wrong"},
+        )
+        assert inactive_wrong_password.status_code == 401
+        assert inactive_wrong_password.json() == {"detail": "Invalid credentials"}
 
 
 def test_expired_access_token_is_rejected() -> None:

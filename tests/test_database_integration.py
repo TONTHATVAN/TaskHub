@@ -5,9 +5,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.api.dependencies import get_current_user
+from app.application.passwords import hash_password
 from app.application.tokens import JwtTokenService
 from app.domain.exceptions import (
     NotFoundError,
@@ -15,6 +16,7 @@ from app.domain.exceptions import (
     TaskNotFoundError,
     UserNotFoundError,
 )
+from app.domain.refresh_token_repository import RefreshConsumeResult
 from app.domain.task import Task, TaskPriority, TaskStatus
 from app.domain.user import User, UserRole
 from app.infrastructure.database import engine, session_factory
@@ -58,6 +60,61 @@ def test_refresh_waits_for_password_change() -> None:
     asyncio.run(_exercise_refresh_password_lock())
 
 
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_login_cannot_use_old_password_during_change() -> None:
+    asyncio.run(_exercise_login_password_lock())
+
+
+async def _exercise_login_password_lock() -> None:
+    user_id = uuid4()
+    email = f"login-lock-{user_id}@example.com"
+    old_hash = await hash_password("old-password")
+    new_hash = await hash_password("new-password")
+    try:
+        async with session_factory() as session:
+            session.add(
+                UserModel(
+                    id=user_id,
+                    email=email,
+                    full_name="Login Lock",
+                    hashed_password=old_hash,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as changing_session:
+            assert await SqlUserRepository(changing_session).update_password(
+                user_id, old_hash, new_hash
+            )
+            async with AsyncClient(
+                transport=ASGITransport(app=create_app()), base_url="http://test"
+            ) as client:
+                old_login = asyncio.create_task(
+                    client.post(
+                        "/api/v1/auth/login",
+                        json={"email": email, "password": "old-password"},
+                    )
+                )
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(old_login), timeout=0.1)
+                await changing_session.commit()
+                assert (await asyncio.wait_for(old_login, timeout=5)).status_code == 401
+                assert (
+                    await client.post(
+                        "/api/v1/auth/login",
+                        json={"email": email, "password": "new-password"},
+                    )
+                ).status_code == 200
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(UserModel).where(UserModel.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
 async def _exercise_refresh_password_lock() -> None:
     user_id = uuid4()
     token_id = uuid4()
@@ -78,8 +135,8 @@ async def _exercise_refresh_password_lock() -> None:
             await session.commit()
 
         async with session_factory() as changing_session:
-            await SqlUserRepository(changing_session).update_password(
-                user_id, "new hash"
+            assert await SqlUserRepository(changing_session).update_password(
+                user_id, "old hash", "new hash"
             )
             async with session_factory() as refreshing_session:
                 waiting_user = asyncio.create_task(
@@ -93,14 +150,33 @@ async def _exercise_refresh_password_lock() -> None:
                 )
                 await changing_session.commit()
                 assert await asyncio.wait_for(waiting_user, timeout=5) is not None
-                assert not await SqlRefreshTokenRepository(refreshing_session).consume(
-                    token_id, user_id, datetime.now(UTC)
+                assert (
+                    await SqlRefreshTokenRepository(refreshing_session).consume(
+                        token_id, user_id, datetime.now(UTC)
+                    )
+                    is RefreshConsumeResult.REPLAYED
                 )
     finally:
         async with session_factory() as session:
             await session.execute(delete(UserModel).where(UserModel.id == user_id))
             await session.commit()
         await engine.dispose()
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_concurrent_refresh_revokes_sessions() -> None:
+    asyncio.run(_exercise_concurrent_refresh())
+
+
+@pytest.mark.skipif(
+    os.getenv("TASKHUB_RUN_DB_TESTS") != "1",
+    reason="Set TASKHUB_RUN_DB_TESTS=1 to run against PostgreSQL",
+)
+def test_postgres_task_insert_after_project_removal_returns_404() -> None:
+    asyncio.run(_exercise_missing_task_project())
 
 
 @pytest.mark.skipif(
@@ -198,10 +274,14 @@ async def _exercise_task_permissions() -> None:
                     headers=headers("viewer"),
                 ),
                 await client.delete(task_endpoint, headers=headers("viewer")),
-                await client.get(endpoint, headers=headers("outsider")),
-                await client.get(task_endpoint, headers=headers("outsider")),
             ):
                 assert response.status_code == 403
+            assert (
+                await client.get(endpoint, headers=headers("outsider"))
+            ).status_code == 404
+            assert (
+                await client.get(task_endpoint, headers=headers("outsider"))
+            ).status_code == 404
             assert (await client.get(task_endpoint, headers=headers("owner"))).json()[
                 "title"
             ] == "Protected"
@@ -232,7 +312,7 @@ async def _exercise_task_permissions() -> None:
                     json={"title": "After removal"},
                     headers=headers("editor"),
                 )
-            ).status_code == 403
+            ).status_code == 404
             assert (
                 await client.delete(task_endpoint, headers=headers("admin"))
             ).status_code == 204
@@ -284,6 +364,15 @@ async def _exercise_profile_update() -> None:
             assert stored is not None
             assert stored.full_name == "New Name"
             assert stored.email == f"new-{user_id}@example.invalid"
+            users = SqlUserRepository(session)
+            assert await users.update_password(user_id, "disabled", "new hash")
+            assert not await users.update_password(user_id, "disabled", "overwritten")
+            assert (
+                await session.scalar(
+                    select(UserModel.hashed_password).where(UserModel.id == user_id)
+                )
+                == "new hash"
+            )
             await BaseRepository(session, UserModel).delete(user_id)
             await session.commit()
 
@@ -292,7 +381,7 @@ async def _exercise_profile_update() -> None:
             with pytest.raises(UserNotFoundError):
                 await users.update_profile(user_id, {"full_name": "Missing"})
             with pytest.raises(UserNotFoundError):
-                await users.update_password(user_id, "unused")
+                await users.update_password(user_id, "unused", "unused")
     finally:
         async with session_factory() as session:
             await session.execute(delete(UserModel).where(UserModel.id == user_id))
@@ -329,6 +418,81 @@ async def _exercise_stale_base_save() -> None:
         async with session_factory() as session:
             await session.execute(delete(UserModel).where(UserModel.id == user_id))
             await session.commit()
+        await engine.dispose()
+
+
+async def _exercise_missing_task_project() -> None:
+    try:
+        task = Task(
+            id=uuid4(),
+            project_id=uuid4(),
+            title="Orphan task",
+            description=None,
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            created_at=datetime.now(UTC),
+        )
+        async with session_factory() as session:
+            with pytest.raises(ProjectNotFoundError):
+                await SqlTaskRepository(session).add(task)
+    finally:
+        await engine.dispose()
+
+
+async def _exercise_concurrent_refresh() -> None:
+    email = f"concurrent-{uuid4()}@example.com"
+    user_id: UUID | None = None
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=create_app()), base_url="http://test"
+        ) as client:
+            registered = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": email,
+                    "full_name": "Concurrent User",
+                    "password": "secure-pass-123",
+                },
+            )
+            assert registered.status_code == 201
+            user_id = UUID(registered.json()["id"])
+            login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": email, "password": "secure-pass-123"},
+            )
+            assert login.status_code == 200
+            old_refresh = login.json()["refresh_token"]
+            first, second = await asyncio.gather(
+                client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
+                ),
+                client.post(
+                    "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
+                ),
+            )
+            assert sorted((first.status_code, second.status_code)) == [200, 401]
+            valid_result = first if first.status_code == 200 else second
+            assert (
+                await client.post(
+                    "/api/v1/auth/refresh",
+                    json={"refresh_token": valid_result.json()["refresh_token"]},
+                )
+            ).status_code == 401
+            async with session_factory() as session:
+                tokens = list(
+                    await session.scalars(
+                        select(RefreshTokenModel).where(
+                            RefreshTokenModel.user_id == user_id
+                        )
+                    )
+                )
+                assert len(tokens) == 2
+                assert all(token.revoked_at is not None for token in tokens)
+    finally:
+        if user_id is not None:
+            async with session_factory() as session:
+                await session.execute(delete(UserModel).where(UserModel.id == user_id))
+                await session.commit()
         await engine.dispose()
 
 
@@ -432,6 +596,12 @@ async def _exercise_auth() -> None:
                 headers=headers,
             )
             assert changed.status_code == 204
+            revoked_after_password_change = await client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": pair["refresh_token"]},
+            )
+            assert revoked_after_password_change.status_code == 401
+            assert revoked_after_password_change.headers["WWW-Authenticate"] == "Bearer"
             assert (
                 await client.post(
                     "/api/v1/auth/login",
@@ -445,25 +615,38 @@ async def _exercise_auth() -> None:
             assert new_login.status_code == 200
 
             refreshed = await client.post(
-                "/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]}
+                "/api/v1/auth/refresh",
+                json={"refresh_token": new_login.json()["refresh_token"]},
             )
-            assert refreshed.status_code == 401
+            assert refreshed.status_code == 200
             assert (
                 await client.post(
                     "/api/v1/auth/refresh",
-                    json={"refresh_token": pair["refresh_token"]},
+                    json={"refresh_token": new_login.json()["refresh_token"]},
                 )
             ).status_code == 401
 
-            new_refresh_token = new_login.json()["refresh_token"]
+            new_refresh_token = refreshed.json()["refresh_token"]
             assert (
                 await client.post(
-                    "/api/v1/auth/logout", json={"refresh_token": new_refresh_token}
+                    "/api/v1/auth/refresh",
+                    json={"refresh_token": new_refresh_token},
+                )
+            ).status_code == 401
+            logout_login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": updated_email, "password": "new-secret-pass-123"},
+            )
+            assert logout_login.status_code == 200
+            logout_token = logout_login.json()["refresh_token"]
+            assert (
+                await client.post(
+                    "/api/v1/auth/logout", json={"refresh_token": logout_token}
                 )
             ).status_code == 204
             assert (
                 await client.post(
-                    "/api/v1/auth/refresh", json={"refresh_token": new_refresh_token}
+                    "/api/v1/auth/refresh", json={"refresh_token": logout_token}
                 )
             ).status_code == 401
 
@@ -472,8 +655,8 @@ async def _exercise_auth() -> None:
                 select(RefreshTokenModel).where(RefreshTokenModel.user_id == user_id)
             )
             stored_tokens = list(tokens)
-            assert len(stored_tokens) == 2
-            assert sum(token.revoked_at is not None for token in stored_tokens) == 2
+            assert len(stored_tokens) == 4
+            assert all(token.revoked_at is not None for token in stored_tokens)
     finally:
         async with session_factory() as session:
             await session.execute(
@@ -612,6 +795,13 @@ async def _exercise_database() -> None:
             assert total >= 1
             stored_user = await users.get(user_id)
             assert stored_user is not None
+            async with session_factory() as concurrent_session:
+                await concurrent_session.execute(
+                    update(UserModel)
+                    .where(UserModel.id == user_id)
+                    .values(is_active=False)
+                )
+                await concurrent_session.commit()
             stored_user.full_name = "Updated User"
             await users.save(stored_user)
             with pytest.raises(NotFoundError):
@@ -625,6 +815,8 @@ async def _exercise_database() -> None:
                 )
 
             memberships = BaseRepository(session, WorkspaceMemberModel)
+            with pytest.raises(ValueError, match="Entity primary key is required"):
+                await memberships.delete(workspace_id)
             member = await memberships.get((workspace_id, user_id))
             assert member is not None
             member.role = WorkspaceRole.EDITOR
@@ -644,6 +836,7 @@ async def _exercise_database() -> None:
             updated_user = await users.get(user_id)
             assert updated_user is not None
             assert updated_user.full_name == "Updated User"
+            assert updated_user.is_active is False
             updated_member = await BaseRepository(session, WorkspaceMemberModel).get(
                 (workspace_id, user_id)
             )

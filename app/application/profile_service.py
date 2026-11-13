@@ -27,5 +27,8 @@ class ProfileService:
     ) -> None:
         if not await verify_password(current_password, user.hashed_password):
             raise IncorrectPasswordError
-        await self._users.update_password(user.id, await hash_password(new_password))
+        if not await self._users.update_password(
+            user.id, user.hashed_password, await hash_password(new_password)
+        ):
+            raise IncorrectPasswordError
         await self._refresh_tokens.revoke_all(user.id, datetime.now(UTC))

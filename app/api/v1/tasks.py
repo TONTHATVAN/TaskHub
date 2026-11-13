@@ -1,4 +1,4 @@
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
@@ -10,7 +10,12 @@ from app.api.dependencies import (
     WritableProjectDep,
     WritableTaskDep,
 )
-from app.api.v1.task_schemas import ErrorRead, TaskCreate, TaskRead, TaskUpdate
+from app.api.v1.error_responses import (
+    ARCHIVED_PROJECT_RESPONSES,
+    PROJECT_RESPONSES,
+    TASK_RESPONSES,
+)
+from app.api.v1.task_schemas import TaskCreate, TaskRead, TaskUpdate
 from app.core.constants import (
     LIMIT_DEFAULT,
     LIMIT_MAX,
@@ -18,54 +23,17 @@ from app.core.constants import (
     PAGE_DEFAULT,
     PAGE_MIN,
 )
-from app.core.messages import (
-    ACCESS_DENIED_MESSAGE,
-    INVALID_ACCESS_TOKEN_MESSAGE,
-    PROJECT_NOT_FOUND_MESSAGE,
-    TASK_NOT_FOUND_MESSAGE,
-)
 from app.domain.task import Task
 
 projects_router = APIRouter(prefix="/projects", tags=["tasks"])
 tasks_router = APIRouter(prefix="/tasks", tags=["tasks"])
-TASK_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_404_NOT_FOUND: {
-        "model": ErrorRead,
-        "description": TASK_NOT_FOUND_MESSAGE,
-    }
-}
-PROJECT_NOT_FOUND_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_404_NOT_FOUND: {
-        "model": ErrorRead,
-        "description": PROJECT_NOT_FOUND_MESSAGE,
-    }
-}
-ACCESS_DENIED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_403_FORBIDDEN: {
-        "model": ErrorRead,
-        "description": ACCESS_DENIED_MESSAGE,
-    }
-}
-UNAUTHORIZED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status.HTTP_401_UNAUTHORIZED: {
-        "model": ErrorRead,
-        "description": INVALID_ACCESS_TOKEN_MESSAGE,
-        "headers": {"WWW-Authenticate": {"schema": {"type": "string"}}},
-    }
-}
-PROJECT_RESPONSES = (
-    PROJECT_NOT_FOUND_RESPONSES | ACCESS_DENIED_RESPONSES | UNAUTHORIZED_RESPONSES
-)
-TASK_RESPONSES = (
-    TASK_NOT_FOUND_RESPONSES | ACCESS_DENIED_RESPONSES | UNAUTHORIZED_RESPONSES
-)
 
 
 @projects_router.post(
     "/{project_id}/tasks",
     response_model=TaskRead,
     status_code=status.HTTP_201_CREATED,
-    responses=PROJECT_RESPONSES,
+    responses=PROJECT_RESPONSES | ARCHIVED_PROJECT_RESPONSES,
 )
 async def create_task(
     project_id: UUID,
@@ -111,7 +79,7 @@ async def get_task(
 @tasks_router.patch(
     "/{task_id}",
     response_model=TaskRead,
-    responses=TASK_RESPONSES,
+    responses=TASK_RESPONSES | ARCHIVED_PROJECT_RESPONSES,
 )
 async def update_task(
     payload: TaskUpdate,
@@ -124,7 +92,7 @@ async def update_task(
 @tasks_router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=TASK_RESPONSES,
+    responses=TASK_RESPONSES | ARCHIVED_PROJECT_RESPONSES,
 )
 async def delete_task(
     task: WritableTaskDep,
