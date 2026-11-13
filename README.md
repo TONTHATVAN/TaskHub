@@ -140,3 +140,7 @@ Trong Workspace, `OWNER`/`EDITOR` và `ADMIN` được tạo Project qua `POST /
 ## Buổi 6 — Giao Task, hạn hoàn thành và lọc danh sách
 
 Khi tạo hoặc cập nhật Task, người có quyền ghi Project có thể đặt `assignee_id` cho một thành viên còn hoạt động trong Workspace và đặt `due_date` có múi giờ. `PATCH` gửi `null` cho hai trường này sẽ xóa người được giao hoặc hạn hoàn thành. `created_by` lấy từ access token và không nhận từ request. Người được giao không hợp lệ trả 409; khi xóa một thành viên khỏi Workspace, các Task trong Workspace đang giao cho người đó được gỡ giao trong cùng giao dịch. Các thao tác ghi giữ khóa bản ghi quyền thành viên đến khi giao dịch kết thúc để tuần tự với việc thu hồi quyền. `GET /api/v1/projects/{project_id}/tasks` nhận bộ lọc `status`, `priority`, `assignee_id` trước khi phân trang bằng `page` và `limit`.
+
+## Buổi 6 — Label
+
+`POST/GET /api/v1/projects/{project_id}/labels` và `GET/PATCH/DELETE /api/v1/projects/{project_id}/labels/{label_id}` quản lý Label trong Project. `POST/DELETE /api/v1/tasks/{task_id}/labels/{label_id}` gắn hoặc bỏ Label khỏi Task; Label phải thuộc cùng Project. `GET /api/v1/tasks/{task_id}/labels` xem các Label đã gắn. `VIEWER` chỉ được đọc; thao tác ghi vào Project đã archive trả 409. Tên Label dài 1–100 ký tự sau trim, màu có dạng `#RRGGBB`; tên trùng trong một Project trả 409.

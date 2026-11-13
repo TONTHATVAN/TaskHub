@@ -5,6 +5,8 @@ from app.core.messages import (
     ACCESS_DENIED_MESSAGE,
     INACTIVE_WORKSPACE_MEMBER_MESSAGE,
     INVALID_TASK_ASSIGNEE_MESSAGE,
+    LABEL_ALREADY_EXISTS_MESSAGE,
+    LABEL_NOT_FOUND_MESSAGE,
     PROJECT_ARCHIVED_MESSAGE,
     PROJECT_NOT_FOUND_MESSAGE,
     TASK_NOT_FOUND_MESSAGE,
@@ -70,3 +72,13 @@ class WorkspaceMemberExistsError(AppException):
 class InactiveWorkspaceMemberError(AppException):
     def __init__(self) -> None:
         super().__init__(INACTIVE_WORKSPACE_MEMBER_MESSAGE, HTTPStatus.CONFLICT)
+
+
+class LabelNotFoundError(NotFoundError):
+    def __init__(self) -> None:
+        super().__init__(LABEL_NOT_FOUND_MESSAGE)
+
+
+class LabelAlreadyExistsError(AppException):
+    def __init__(self) -> None:
+        super().__init__(LABEL_ALREADY_EXISTS_MESSAGE, HTTPStatus.CONFLICT)
