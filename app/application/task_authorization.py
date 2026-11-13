@@ -49,11 +49,17 @@ class TaskAuthorizationService:
         return access
 
     async def require_task(self, user: User, task_id: UUID, *, write: bool) -> Task:
+        task, _ = await self.require_task_with_access(user, task_id, write=write)
+        return task
+
+    async def require_task_with_access(
+        self, user: User, task_id: UUID, *, write: bool
+    ) -> tuple[Task, ProjectAccess]:
         task = await self._tasks.get(task_id)
         if task is None:
             raise TaskNotFoundError
         try:
-            await self.require_project(user, task.project_id, write=write)
+            access = await self.require_project(user, task.project_id, write=write)
         except ProjectNotFoundError as exc:
             raise TaskNotFoundError from exc
-        return task
+        return task, access

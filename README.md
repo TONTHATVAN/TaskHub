@@ -144,3 +144,7 @@ Khi tạo hoặc cập nhật Task, người có quyền ghi Project có thể �
 ## Buổi 6 — Label
 
 `POST/GET /api/v1/projects/{project_id}/labels` và `GET/PATCH/DELETE /api/v1/projects/{project_id}/labels/{label_id}` quản lý Label trong Project. `POST/DELETE /api/v1/tasks/{task_id}/labels/{label_id}` gắn hoặc bỏ Label khỏi Task; Label phải thuộc cùng Project. `GET /api/v1/tasks/{task_id}/labels` xem các Label đã gắn. `VIEWER` chỉ được đọc; thao tác ghi vào Project đã archive trả 409. Tên Label dài 1–100 ký tự sau trim, màu có dạng `#RRGGBB`; tên trùng trong một Project trả 409.
+
+## Buổi 6 — Comment
+
+`POST /api/v1/tasks/{task_id}/comments` thêm Comment; `GET /api/v1/tasks/{task_id}/comments` xem danh sách có phân trang; `DELETE /api/v1/tasks/{task_id}/comments/{comment_id}` xóa Comment. Thành viên có quyền ghi mới được thêm Comment; tác giả, chủ Workspace hoặc `ADMIN` được xóa. `VIEWER` chỉ được xem. Thao tác ghi vào Project đã archive trả 409.
