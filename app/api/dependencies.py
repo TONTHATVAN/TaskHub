@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
+from app.application.comment_service import CommentService
 from app.application.label_service import LabelService
 from app.application.profile_service import ProfileService
 from app.application.project_service import ProjectService
@@ -15,7 +16,8 @@ from app.application.task_authorization import TaskAuthorizationService
 from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
-from app.domain.authorization import ProjectAccessRepository
+from app.domain.authorization import ProjectAccess, ProjectAccessRepository
+from app.domain.comment_repository import CommentRepository
 from app.domain.label_repository import LabelRepository
 from app.domain.project import Project
 from app.domain.project_repository import ProjectRepository
@@ -28,6 +30,7 @@ from app.domain.workspace import Workspace
 from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
+from app.infrastructure.repositories.comment import SqlCommentRepository
 from app.infrastructure.repositories.label import SqlLabelRepository
 from app.infrastructure.repositories.project import SqlProjectRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
@@ -65,6 +68,21 @@ def get_label_service(
 
 
 LabelServiceDep = Annotated[LabelService, Depends(get_label_service)]
+
+
+async def get_comment_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> CommentRepository:
+    return SqlCommentRepository(session)
+
+
+def get_comment_service(
+    repository: Annotated[CommentRepository, Depends(get_comment_repository)],
+) -> CommentService:
+    return CommentService(repository)
+
+
+CommentServiceDep = Annotated[CommentService, Depends(get_comment_service)]
 
 
 async def get_project_access_repository(
@@ -246,6 +264,12 @@ async def get_writable_task(
     return await authorization.require_task(user, task_id, write=True)
 
 
+async def get_writable_task_with_access(
+    task_id: UUID, user: CurrentUserDep, authorization: TaskAuthorizationDep
+) -> tuple[Task, ProjectAccess]:
+    return await authorization.require_task_with_access(user, task_id, write=True)
+
+
 ReadableProjectDep = Annotated[Project, Depends(get_readable_project)]
 WritableProjectDep = Annotated[Project, Depends(get_writable_project)]
 WritableArchivedProjectDep = Annotated[Project, Depends(get_writable_archived_project)]
@@ -254,3 +278,6 @@ WritableWorkspaceDep = Annotated[Workspace, Depends(get_writable_workspace)]
 ManageableWorkspaceDep = Annotated[Workspace, Depends(get_manageable_workspace)]
 ReadableTaskDep = Annotated[Task, Depends(get_readable_task)]
 WritableTaskDep = Annotated[Task, Depends(get_writable_task)]
+WritableTaskAccessDep = Annotated[
+    tuple[Task, ProjectAccess], Depends(get_writable_task_with_access)
+]

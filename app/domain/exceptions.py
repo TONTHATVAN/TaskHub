@@ -3,6 +3,7 @@ from http import HTTPStatus
 from app.core.exceptions import AppException
 from app.core.messages import (
     ACCESS_DENIED_MESSAGE,
+    COMMENT_NOT_FOUND_MESSAGE,
     INACTIVE_WORKSPACE_MEMBER_MESSAGE,
     INVALID_TASK_ASSIGNEE_MESSAGE,
     LABEL_ALREADY_EXISTS_MESSAGE,
@@ -82,3 +83,8 @@ class LabelNotFoundError(NotFoundError):
 class LabelAlreadyExistsError(AppException):
     def __init__(self) -> None:
         super().__init__(LABEL_ALREADY_EXISTS_MESSAGE, HTTPStatus.CONFLICT)
+
+
+class CommentNotFoundError(NotFoundError):
+    def __init__(self) -> None:
+        super().__init__(COMMENT_NOT_FOUND_MESSAGE)
