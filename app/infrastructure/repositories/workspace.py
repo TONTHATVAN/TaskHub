@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import UserNotFoundError, WorkspaceNotFoundError
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
-from app.infrastructure.models import UserModel, WorkspaceMemberModel, WorkspaceModel
+from app.infrastructure.models import (
+    ProjectModel,
+    TaskModel,
+    UserModel,
+    WorkspaceMemberModel,
+    WorkspaceModel,
+)
 
 
 class SqlWorkspaceRepository:
@@ -126,4 +132,18 @@ class SqlWorkspaceRepository:
             )
             .returning(WorkspaceMemberModel.user_id)
         )
-        return result.scalar_one_or_none() is not None
+        if result.scalar_one_or_none() is None:
+            return False
+        await self._session.execute(
+            update(TaskModel)
+            .where(
+                TaskModel.assignee_id == user_id,
+                TaskModel.project_id.in_(
+                    select(ProjectModel.id).where(
+                        ProjectModel.workspace_id == workspace_id
+                    )
+                ),
+            )
+            .values(assignee_id=None)
+        )
+        return True

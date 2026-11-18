@@ -4,6 +4,7 @@ from app.core.exceptions import AppException
 from app.core.messages import (
     ACCESS_DENIED_MESSAGE,
     INACTIVE_WORKSPACE_MEMBER_MESSAGE,
+    INVALID_TASK_ASSIGNEE_MESSAGE,
     PROJECT_ARCHIVED_MESSAGE,
     PROJECT_NOT_FOUND_MESSAGE,
     TASK_NOT_FOUND_MESSAGE,
@@ -39,6 +40,11 @@ class ProjectArchivedError(AppException):
 class TaskNotFoundError(NotFoundError):
     def __init__(self) -> None:
         super().__init__(TASK_NOT_FOUND_MESSAGE)
+
+
+class InvalidTaskAssigneeError(AppException):
+    def __init__(self) -> None:
+        super().__init__(INVALID_TASK_ASSIGNEE_MESSAGE, HTTPStatus.CONFLICT)
 
 
 class UserNotFoundError(NotFoundError):

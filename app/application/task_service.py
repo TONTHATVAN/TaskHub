@@ -19,7 +19,12 @@ class TaskService:
         description: str | None,
         status: TaskStatus,
         priority: TaskPriority,
+        created_by: UUID,
+        assignee_id: UUID | None = None,
+        due_date: datetime | None = None,
     ) -> Task:
+        if assignee_id is not None:
+            await self._repository.require_assignable(project_id, assignee_id)
         task = Task(
             id=uuid4(),
             project_id=project_id,
@@ -28,15 +33,30 @@ class TaskService:
             status=status,
             priority=priority,
             created_at=datetime.now(UTC),
+            assignee_id=assignee_id,
+            due_date=due_date,
+            created_by=created_by,
         )
         await self._repository.add(task)
         return task
 
     async def list_by_project(
-        self, project_id: UUID, *, page: int = PAGE_DEFAULT, limit: int = LIMIT_DEFAULT
+        self,
+        project_id: UUID,
+        *,
+        page: int = PAGE_DEFAULT,
+        limit: int = LIMIT_DEFAULT,
+        status: TaskStatus | None = None,
+        priority: TaskPriority | None = None,
+        assignee_id: UUID | None = None,
     ) -> list[Task]:
         return await self._repository.list_by_project(
-            project_id, page=page, limit=limit
+            project_id,
+            page=page,
+            limit=limit,
+            status=status,
+            priority=priority,
+            assignee_id=assignee_id,
         )
 
     async def get(self, task_id: UUID) -> Task:
@@ -46,6 +66,10 @@ class TaskService:
         return task
 
     async def update(self, task: Task, changes: TaskChanges) -> Task:
+        if "assignee_id" in changes and changes["assignee_id"] is not None:
+            await self._repository.require_assignable(
+                task.project_id, changes["assignee_id"]
+            )
         updated_task = replace(task, **changes)
         if changes:
             return await self._repository.save(updated_task, changes)
