@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     jwt_secret_key: SecretStr = Field(min_length=JWT_SECRET_KEY_MIN_LENGTH)
     jwt_access_minutes: int = Field(default=15, gt=0)
     jwt_refresh_days: int = Field(default=7, gt=0)
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str = "noreply@taskhub.com"
+    smtp_use_tls: bool = False
+    email_notifications_enabled: bool = True
 
     @field_validator("jwt_secret_key")
     @classmethod

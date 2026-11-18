@@ -154,3 +154,7 @@ Khi tạo hoặc cập nhật Task, người có quyền ghi Project có thể �
 Danh sách Task tại `GET /api/v1/projects/{project_id}/tasks` được cache bằng Redis theo `project_id`, các tham số lọc (`status`, `priority`, `assignee_id`) và phân trang (`page`, `limit`) với thời gian sống mặc định 300 giây (`TASK_CACHE_TTL_SECONDS`).
 
 Khi có bất kỳ thay đổi nào tác động đến dữ liệu Task trong Project (`POST` tạo Task, `PATCH` cập nhật Task, `DELETE` xóa Task, hoặc gỡ người giao việc khi xóa thành viên khỏi Workspace), toàn bộ cache liên quan của Project đó sẽ tự động được xóa để đảm bảo tính nhất quán dữ liệu. Trong trường hợp Redis tạm thời gặp sự cố mất kết nối, hệ thống tự động fallback về truy vấn trực tiếp cơ sở dữ liệu mà không làm gián đoạn API của người dùng.
+
+## Buổi 7 — Background Task thông báo email khi giao Task
+
+Khi tạo Task có người thực hiện (`assignee_id`) hoặc khi cập nhật thay đổi người thực hiện sang thành viên khác, hệ thống kích hoạt một tác vụ chạy nền (`fastapi.BackgroundTasks`) để gửi email thông báo cho thành viên được giao việc qua SMTP (`aiosmtplib`). Thao tác gửi email chạy ngầm sau khi phản hồi HTTP đã được gửi về client, giúp API phản hồi tức thì mà không bị trễ bởi kết nối mạng tới máy chủ mail.
