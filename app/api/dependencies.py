@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
+from app.application.label_service import LabelService
 from app.application.profile_service import ProfileService
 from app.application.project_service import ProjectService
 from app.application.session_service import SessionService
@@ -15,6 +16,7 @@ from app.application.task_service import TaskService
 from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
 from app.domain.authorization import ProjectAccessRepository
+from app.domain.label_repository import LabelRepository
 from app.domain.project import Project
 from app.domain.project_repository import ProjectRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
@@ -26,6 +28,7 @@ from app.domain.workspace import Workspace
 from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
+from app.infrastructure.repositories.label import SqlLabelRepository
 from app.infrastructure.repositories.project import SqlProjectRepository
 from app.infrastructure.repositories.refresh_token import SqlRefreshTokenRepository
 from app.infrastructure.repositories.task import SqlTaskRepository
@@ -47,6 +50,21 @@ def get_task_service(
 
 
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+
+
+async def get_label_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> LabelRepository:
+    return SqlLabelRepository(session)
+
+
+def get_label_service(
+    repository: Annotated[LabelRepository, Depends(get_label_repository)],
+) -> LabelService:
+    return LabelService(repository)
+
+
+LabelServiceDep = Annotated[LabelService, Depends(get_label_service)]
 
 
 async def get_project_access_repository(

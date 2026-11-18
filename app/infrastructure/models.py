@@ -15,6 +15,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.constants import (
+    LABEL_COLOR_LENGTH,
+    LABEL_NAME_MAX_LENGTH,
     PROJECT_NAME_MAX_LENGTH,
     TASK_TITLE_MAX_LENGTH,
     USER_EMAIL_MAX_LENGTH,
@@ -232,8 +234,8 @@ class LabelModel(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
-    name: Mapped[str] = mapped_column(String(100))
-    color: Mapped[str] = mapped_column(String(7))
+    name: Mapped[str] = mapped_column(String(LABEL_NAME_MAX_LENGTH))
+    color: Mapped[str] = mapped_column(String(LABEL_COLOR_LENGTH))
 
     project: Mapped[ProjectModel] = relationship(back_populates="labels")
     tasks: Mapped[list[TaskModel]] = relationship(
