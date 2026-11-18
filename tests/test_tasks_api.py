@@ -164,6 +164,11 @@ def test_task_assignment_due_date_and_filters() -> None:
             ).status_code
             == 422
         )
+        past_create = client.post(
+            endpoint, json={"title": "Past due", "due_date": "2020-01-01T00:00:00Z"}
+        )
+        assert past_create.status_code == 422
+        assert "Due date cannot be in the past" in past_create.text
         assert (
             client.post(
                 endpoint, json={"title": "Forged", "created_by": str(uuid4())}
@@ -201,6 +206,17 @@ def test_task_assignment_due_date_and_filters() -> None:
         assert client.get(endpoint, params={"assignee_id": "bad"}).status_code == 422
 
         task_endpoint = f"/api/v1/tasks/{task['id']}"
+        past_update = client.patch(
+            task_endpoint, json={"due_date": "2020-01-01T00:00:00Z"}
+        )
+        assert past_update.status_code == 422
+        assert "Due date cannot be in the past" in past_update.text
+        assert (
+            client.patch(
+                task_endpoint, json={"due_date": "2026-12-02T09:00:00"}
+            ).status_code
+            == 422
+        )
         failed_update = client.patch(
             task_endpoint,
             json={

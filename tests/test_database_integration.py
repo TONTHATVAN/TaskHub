@@ -308,6 +308,17 @@ async def _exercise_task_permissions() -> None:
                 )
             ).status_code == 201
 
+            past_due = await client.post(
+                endpoint,
+                json={
+                    "title": "Past Due",
+                    "due_date": "2020-01-01T00:00:00Z",
+                },
+                headers=headers("owner"),
+            )
+            assert past_due.status_code == 422
+            assert "Due date cannot be in the past" in past_due.text
+
             assigned = await client.post(
                 endpoint,
                 json={
@@ -320,6 +331,13 @@ async def _exercise_task_permissions() -> None:
             )
             assert assigned.status_code == 201
             assigned_path = f"/api/v1/tasks/{assigned.json()['id']}"
+            past_update = await client.patch(
+                assigned_path,
+                json={"due_date": "2020-01-01T00:00:00Z"},
+                headers=headers("owner"),
+            )
+            assert past_update.status_code == 422
+            assert "Due date cannot be in the past" in past_update.text
             assert assigned.json()["created_by"] == str(users["owner"].id)
             assert assigned.json()["assignee_id"] == str(users["editor"].id)
             assert (

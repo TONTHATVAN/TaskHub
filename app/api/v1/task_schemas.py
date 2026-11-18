@@ -1,17 +1,33 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, cast
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from app.core.constants import TASK_TITLE_MAX_LENGTH, TASK_TITLE_MIN_LENGTH
-from app.core.messages import NULL_REQUIRED_FIELD_MESSAGE
+from app.core.messages import NULL_REQUIRED_FIELD_MESSAGE, PAST_DUE_DATE_MESSAGE
 from app.domain.task import TaskPriority, TaskStatus
 from app.domain.task_repository import TaskChanges
 
 TaskTitle = Annotated[
     str, Field(min_length=TASK_TITLE_MIN_LENGTH, max_length=TASK_TITLE_MAX_LENGTH)
 ]
+
+
+def validate_due_date(value: datetime) -> datetime:
+    if value < datetime.now(UTC):
+        raise ValueError(PAST_DUE_DATE_MESSAGE)
+    return value
+
+
+TaskDueDate = Annotated[AwareDatetime, AfterValidator(validate_due_date)]
 
 
 class TaskPayload(BaseModel):
@@ -24,7 +40,7 @@ class TaskCreate(TaskPayload):
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
     assignee_id: UUID | None = None
-    due_date: AwareDatetime | None = None
+    due_date: TaskDueDate | None = None
 
 
 class TaskUpdate(TaskPayload):
@@ -33,7 +49,7 @@ class TaskUpdate(TaskPayload):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     assignee_id: UUID | None = None
-    due_date: AwareDatetime | None = None
+    due_date: TaskDueDate | None = None
 
     @field_validator("title", "status", "priority", mode="before")
     @classmethod
