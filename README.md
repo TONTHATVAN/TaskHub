@@ -148,3 +148,9 @@ Khi tạo hoặc cập nhật Task, người có quyền ghi Project có thể �
 ## Buổi 6 — Comment
 
 `POST /api/v1/tasks/{task_id}/comments` thêm Comment; `GET /api/v1/tasks/{task_id}/comments` xem danh sách có phân trang; `DELETE /api/v1/tasks/{task_id}/comments/{comment_id}` xóa Comment. Thành viên có quyền ghi mới được thêm Comment; tác giả, chủ Workspace hoặc `ADMIN` được xóa. `VIEWER` chỉ được xem. Thao tác ghi vào Project đã archive trả 409.
+
+## Buổi 7 — Redis Caching cho Task
+
+Danh sách Task tại `GET /api/v1/projects/{project_id}/tasks` được cache bằng Redis theo `project_id`, các tham số lọc (`status`, `priority`, `assignee_id`) và phân trang (`page`, `limit`) với thời gian sống mặc định 300 giây (`TASK_CACHE_TTL_SECONDS`).
+
+Khi có bất kỳ thay đổi nào tác động đến dữ liệu Task trong Project (`POST` tạo Task, `PATCH` cập nhật Task, `DELETE` xóa Task, hoặc gỡ người giao việc khi xóa thành viên khỏi Workspace), toàn bộ cache liên quan của Project đó sẽ tự động được xóa để đảm bảo tính nhất quán dữ liệu. Trong trường hợp Redis tạm thời gặp sự cố mất kết nối, hệ thống tự động fallback về truy vấn trực tiếp cơ sở dữ liệu mà không làm gián đoạn API của người dùng.

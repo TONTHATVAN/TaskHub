@@ -9,6 +9,7 @@ from app.domain.exceptions import (
     WorkspaceMemberNotFoundError,
     WorkspaceNotFoundError,
 )
+from app.domain.task_cache import TaskCacheService
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
@@ -16,9 +17,15 @@ from app.domain.workspace_repository import WorkspaceRepository
 
 
 class WorkspaceService:
-    def __init__(self, repository: WorkspaceRepository, users: UserRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkspaceRepository,
+        users: UserRepository,
+        cache: TaskCacheService | None = None,
+    ) -> None:
         self._repository = repository
         self._users = users
+        self._cache = cache
 
     async def create(self, user: User, name: str) -> Workspace:
         return await self._repository.add(name, user.id)
@@ -89,3 +96,5 @@ class WorkspaceService:
             if await self._repository.get(workspace.id) is None:
                 raise WorkspaceNotFoundError
             raise WorkspaceMemberNotFoundError
+        if self._cache is not None:
+            await self._cache.invalidate_all()
