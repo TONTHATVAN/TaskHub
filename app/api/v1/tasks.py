@@ -7,7 +7,6 @@ from app.api.dependencies import (
     CurrentUserDep,
     ReadableProjectDep,
     ReadableTaskDep,
-    TaskNotificationServiceDep,
     TaskServiceDep,
     WritableProjectDep,
     WritableTaskDep,
@@ -45,9 +44,8 @@ async def create_task(
     service: TaskServiceDep,
     user: CurrentUserDep,
     background_tasks: BackgroundTasks,
-    notifications: TaskNotificationServiceDep,
 ) -> Task:
-    task = await service.create(
+    return await service.create(
         project_id=project_id,
         title=payload.title,
         description=payload.description,
@@ -56,15 +54,8 @@ async def create_task(
         created_by=user.id,
         assignee_id=payload.assignee_id,
         due_date=payload.due_date,
+        background_tasks=background_tasks,
     )
-    if task.assignee_id is not None:
-        await notifications.notify_assignee_in_background(
-            background_tasks,
-            assignee_id=task.assignee_id,
-            task_title=task.title,
-            task_id=task.id,
-        )
-    return task
 
 
 @projects_router.get(
@@ -113,21 +104,12 @@ async def update_task(
     task: WritableTaskDep,
     service: TaskServiceDep,
     background_tasks: BackgroundTasks,
-    notifications: TaskNotificationServiceDep,
 ) -> Task:
-    previous_assignee_id = task.assignee_id
-    updated_task = await service.update(task, payload.to_changes())
-    if (
-        updated_task.assignee_id is not None
-        and updated_task.assignee_id != previous_assignee_id
-    ):
-        await notifications.notify_assignee_in_background(
-            background_tasks,
-            assignee_id=updated_task.assignee_id,
-            task_title=updated_task.title,
-            task_id=updated_task.id,
-        )
-    return updated_task
+    return await service.update(
+        task,
+        payload.to_changes(),
+        background_tasks=background_tasks,
+    )
 
 
 @tasks_router.delete(

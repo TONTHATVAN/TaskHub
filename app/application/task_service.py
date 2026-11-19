@@ -1,6 +1,9 @@
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+from fastapi import BackgroundTasks
 
 from app.core.constants import LIMIT_DEFAULT, PAGE_DEFAULT
 from app.domain.exceptions import TaskNotFoundError
@@ -8,15 +11,20 @@ from app.domain.task import Task, TaskPriority, TaskStatus
 from app.domain.task_cache import TaskCacheService
 from app.domain.task_repository import TaskChanges, TaskRepository
 
+if TYPE_CHECKING:
+    from app.application.notification_service import TaskNotificationService
+
 
 class TaskService:
     def __init__(
         self,
         repository: TaskRepository,
         cache: TaskCacheService | None = None,
+        notifications: "TaskNotificationService | None" = None,
     ) -> None:
         self._repository = repository
         self._cache = cache
+        self._notifications = notifications
 
     async def create(
         self,
@@ -28,6 +36,7 @@ class TaskService:
         created_by: UUID,
         assignee_id: UUID | None = None,
         due_date: datetime | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> Task:
         if assignee_id is not None:
             await self._repository.require_assignable(project_id, assignee_id)
@@ -47,6 +56,17 @@ class TaskService:
         await self._repository.commit()
         if self._cache is not None:
             await self._cache.invalidate_project(project_id)
+        if (
+            self._notifications is not None
+            and background_tasks is not None
+            and task.assignee_id is not None
+        ):
+            await self._notifications.notify_assignee_in_background(
+                background_tasks,
+                assignee_id=task.assignee_id,
+                task_title=task.title,
+                task_id=task.id,
+            )
         return task
 
     async def list_by_project(
@@ -96,17 +116,35 @@ class TaskService:
             raise TaskNotFoundError
         return task
 
-    async def update(self, task: Task, changes: TaskChanges) -> Task:
+    async def update(
+        self,
+        task: Task,
+        changes: TaskChanges,
+        background_tasks: BackgroundTasks | None = None,
+    ) -> Task:
         if "assignee_id" in changes and changes["assignee_id"] is not None:
             await self._repository.require_assignable(
                 task.project_id, changes["assignee_id"]
             )
+        previous_assignee_id = task.assignee_id
         updated_task = replace(task, **changes)
         if changes:
             saved_task = await self._repository.save(updated_task, changes)
             await self._repository.commit()
             if self._cache is not None:
                 await self._cache.invalidate_project(task.project_id)
+            if (
+                self._notifications is not None
+                and background_tasks is not None
+                and saved_task.assignee_id is not None
+                and saved_task.assignee_id != previous_assignee_id
+            ):
+                await self._notifications.notify_assignee_in_background(
+                    background_tasks,
+                    assignee_id=saved_task.assignee_id,
+                    task_title=saved_task.title,
+                    task_id=saved_task.id,
+                )
             return saved_task
         return updated_task
 

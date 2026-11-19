@@ -128,6 +128,28 @@ async def test_smtp_email_service_graceful_fallback_on_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_smtp_email_service_removes_newlines_from_subject_header() -> None:
+    service = SmtpEmailService(sender="admin@example.com", enabled=True)
+    task_id = uuid4()
+    with patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+        title_with_newlines = "Task with\nnewline and\r\ncarriage return"
+        await service.send_task_assignment_email(
+            recipient_email="assignee@example.com",
+            recipient_name="Jane Doe",
+            task_title=title_with_newlines,
+            task_id=task_id,
+        )
+        mock_send.assert_awaited_once()
+        message = mock_send.call_args[0][0]
+        assert "\n" not in message["Subject"]
+        assert "\r" not in message["Subject"]
+        assert (
+            message["Subject"]
+            == "[TaskHub] You were assigned to task: Task with newline and carriage return"
+        )
+
+
+@pytest.mark.asyncio
 async def test_in_memory_email_service() -> None:
     service = InMemoryEmailService()
     task_id = uuid4()
@@ -314,3 +336,60 @@ def test_api_task_assignment_notification_flow() -> None:
         )
         assert res_unassign.status_code == 200
         assert len(email_service.sent_emails) == 2  # Still 2
+
+
+@pytest.mark.asyncio
+async def test_task_service_triggers_notification_on_create_and_update() -> None:
+    from app.application.task_service import TaskService
+    from app.domain.task import TaskPriority, TaskStatus
+
+    user_repo = MemoryUserRepository()
+    email_service = InMemoryEmailService()
+    notifications = TaskNotificationService(user_repo, email_service)
+    repo = InMemoryTaskRepository()
+
+    user_id = uuid4()
+    user_repo.add_user(user_id, email="dev@example.com", full_name="Developer")
+    repo.assignable_users.add(user_id)
+
+    service = TaskService(repository=repo, notifications=notifications)
+    project_id = uuid4()
+    bg_tasks = BackgroundTasks()
+
+    # 1. Create with assignee schedules background task
+    task = await service.create(
+        project_id=project_id,
+        title="Created Task",
+        description=None,
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        created_by=uuid4(),
+        assignee_id=user_id,
+        background_tasks=bg_tasks,
+    )
+    assert len(bg_tasks.tasks) == 1
+
+    # Execute scheduled background task
+    for t in bg_tasks.tasks:
+        await t()
+    assert len(email_service.sent_emails) == 1
+    assert email_service.sent_emails[0].recipient_email == "dev@example.com"
+
+    # 2. Update without changing assignee -> No new background task scheduled
+    bg_tasks_2 = BackgroundTasks()
+    await service.update(task, {"title": "New Title"}, background_tasks=bg_tasks_2)
+    assert len(bg_tasks_2.tasks) == 0
+
+    # 3. Update with new assignee -> New background task scheduled
+    new_user_id = uuid4()
+    user_repo.add_user(new_user_id, email="dev2@example.com", full_name="Developer 2")
+    repo.assignable_users.add(new_user_id)
+    bg_tasks_3 = BackgroundTasks()
+    await service.update(
+        task, {"assignee_id": new_user_id}, background_tasks=bg_tasks_3
+    )
+    assert len(bg_tasks_3.tasks) == 1
+    for t in bg_tasks_3.tasks:
+        await t()
+    assert len(email_service.sent_emails) == 2
+    assert email_service.sent_emails[1].recipient_email == "dev2@example.com"

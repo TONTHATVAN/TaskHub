@@ -62,11 +62,52 @@ def get_task_cache_service() -> TaskCacheService:
 TaskCacheServiceDep = Annotated[TaskCacheService, Depends(get_task_cache_service)]
 
 
+async def get_user_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> UserRepository:
+    return SqlUserRepository(session)
+
+
+UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
+
+
+def get_email_service() -> EmailService:
+    return SmtpEmailService(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password.get_secret_value()
+        if settings.smtp_password
+        else None,
+        sender=settings.smtp_from,
+        use_tls=settings.smtp_use_tls,
+        enabled=settings.email_notifications_enabled,
+    )
+
+
+EmailServiceDep = Annotated[EmailService, Depends(get_email_service)]
+
+
+def get_task_notification_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    email_service: Annotated[EmailService, Depends(get_email_service)],
+) -> TaskNotificationService:
+    return TaskNotificationService(users, email_service)
+
+
+TaskNotificationServiceDep = Annotated[
+    TaskNotificationService, Depends(get_task_notification_service)
+]
+
+
 def get_task_service(
     repository: Annotated[TaskRepository, Depends(get_task_repository)],
     cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
+    notifications: Annotated[
+        TaskNotificationService, Depends(get_task_notification_service)
+    ],
 ) -> TaskService:
-    return TaskService(repository, cache=cache)
+    return TaskService(repository, cache=cache, notifications=notifications)
 
 
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
@@ -117,44 +158,6 @@ def get_task_authorization_service(
 
 TaskAuthorizationDep = Annotated[
     TaskAuthorizationService, Depends(get_task_authorization_service)
-]
-
-
-async def get_user_repository(
-    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
-) -> UserRepository:
-    return SqlUserRepository(session)
-
-
-UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
-
-
-def get_email_service() -> EmailService:
-    return SmtpEmailService(
-        host=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_username,
-        password=settings.smtp_password.get_secret_value()
-        if settings.smtp_password
-        else None,
-        sender=settings.smtp_from,
-        use_tls=settings.smtp_use_tls,
-        enabled=settings.email_notifications_enabled,
-    )
-
-
-EmailServiceDep = Annotated[EmailService, Depends(get_email_service)]
-
-
-def get_task_notification_service(
-    users: Annotated[UserRepository, Depends(get_user_repository)],
-    email_service: Annotated[EmailService, Depends(get_email_service)],
-) -> TaskNotificationService:
-    return TaskNotificationService(users, email_service)
-
-
-TaskNotificationServiceDep = Annotated[
-    TaskNotificationService, Depends(get_task_notification_service)
 ]
 
 

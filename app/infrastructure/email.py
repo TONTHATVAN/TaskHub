@@ -39,10 +39,15 @@ class SmtpEmailService:
         if not self.enabled:
             return
 
+        clean_subject_title = " ".join(
+            task_title.replace("\r", " ").replace("\n", " ").split()
+        )
         message = EmailMessage()
         message["From"] = self.sender
         message["To"] = recipient_email
-        message["Subject"] = f"[TaskHub] You were assigned to task: {task_title}"
+        message["Subject"] = (
+            f"[TaskHub] You were assigned to task: {clean_subject_title}"
+        )
         message.set_content(
             f"Hello {recipient_name},\n\n"
             f'You have been assigned to task "{task_title}" (ID: {task_id}).\n\n'
@@ -58,7 +63,7 @@ class SmtpEmailService:
                 password=self.password,
                 start_tls=self.use_tls,
             )
-        except (SMTPException, OSError, TimeoutError) as exc:
+        except (SMTPException, OSError, TimeoutError, ValueError) as exc:
             logger.warning(
                 "Failed to send assignment email to %s: %s", recipient_email, exc
             )
