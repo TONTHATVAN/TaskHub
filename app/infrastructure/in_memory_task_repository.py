@@ -50,3 +50,6 @@ class InMemoryTaskRepository:
 
     async def delete(self, task_id: UUID) -> bool:
         return self._tasks.pop(task_id, None) is not None
+
+    async def commit(self) -> None:
+        pass

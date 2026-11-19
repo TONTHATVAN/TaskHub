@@ -129,3 +129,6 @@ class SqlTaskRepository:
             delete(TaskModel).where(TaskModel.id == task_id).returning(TaskModel.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def commit(self) -> None:
+        await self._session.commit()

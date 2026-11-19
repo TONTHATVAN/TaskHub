@@ -44,6 +44,7 @@ class TaskService:
             created_by=created_by,
         )
         await self._repository.add(task)
+        await self._repository.commit()
         if self._cache is not None:
             await self._cache.invalidate_project(project_id)
         return task
@@ -103,6 +104,7 @@ class TaskService:
         updated_task = replace(task, **changes)
         if changes:
             saved_task = await self._repository.save(updated_task, changes)
+            await self._repository.commit()
             if self._cache is not None:
                 await self._cache.invalidate_project(task.project_id)
             return saved_task
@@ -111,5 +113,6 @@ class TaskService:
     async def delete(self, task: Task) -> None:
         if not await self._repository.delete(task.id):
             raise TaskNotFoundError
+        await self._repository.commit()
         if self._cache is not None:
             await self._cache.invalidate_project(task.project_id)
