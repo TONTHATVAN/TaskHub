@@ -9,6 +9,7 @@ from app.api.exceptions import InactiveUserException, UnauthorizedException
 from app.application.auth_service import AuthService
 from app.application.comment_service import CommentService
 from app.application.label_service import LabelService
+from app.application.notification_service import TaskNotificationService
 from app.application.profile_service import ProfileService
 from app.application.project_service import ProjectService
 from app.application.session_service import SessionService
@@ -18,6 +19,7 @@ from app.application.tokens import InvalidTokenError, JwtTokenService, TokenType
 from app.application.workspace_service import WorkspaceService
 from app.domain.authorization import ProjectAccess, ProjectAccessRepository
 from app.domain.comment_repository import CommentRepository
+from app.domain.email_service import EmailService
 from app.domain.label_repository import LabelRepository
 from app.domain.project import Project
 from app.domain.project_repository import ProjectRepository
@@ -30,6 +32,7 @@ from app.domain.user_repository import UserRepository
 from app.domain.workspace import Workspace
 from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
+from app.infrastructure.email import SmtpEmailService
 from app.infrastructure.redis import get_redis_client
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
 from app.infrastructure.repositories.comment import SqlCommentRepository
@@ -59,11 +62,52 @@ def get_task_cache_service() -> TaskCacheService:
 TaskCacheServiceDep = Annotated[TaskCacheService, Depends(get_task_cache_service)]
 
 
+async def get_user_repository(
+    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
+) -> UserRepository:
+    return SqlUserRepository(session)
+
+
+UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
+
+
+def get_email_service() -> EmailService:
+    return SmtpEmailService(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password.get_secret_value()
+        if settings.smtp_password
+        else None,
+        sender=settings.smtp_from,
+        use_tls=settings.smtp_use_tls,
+        enabled=settings.email_notifications_enabled,
+    )
+
+
+EmailServiceDep = Annotated[EmailService, Depends(get_email_service)]
+
+
+def get_task_notification_service(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    email_service: Annotated[EmailService, Depends(get_email_service)],
+) -> TaskNotificationService:
+    return TaskNotificationService(users, email_service)
+
+
+TaskNotificationServiceDep = Annotated[
+    TaskNotificationService, Depends(get_task_notification_service)
+]
+
+
 def get_task_service(
     repository: Annotated[TaskRepository, Depends(get_task_repository)],
     cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
+    notifications: Annotated[
+        TaskNotificationService, Depends(get_task_notification_service)
+    ],
 ) -> TaskService:
-    return TaskService(repository, cache=cache)
+    return TaskService(repository, cache=cache, notifications=notifications)
 
 
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
@@ -115,12 +159,6 @@ def get_task_authorization_service(
 TaskAuthorizationDep = Annotated[
     TaskAuthorizationService, Depends(get_task_authorization_service)
 ]
-
-
-async def get_user_repository(
-    session: Annotated[AsyncSession, Depends(get_session, scope="function")],
-) -> UserRepository:
-    return SqlUserRepository(session)
 
 
 async def get_workspace_repository(

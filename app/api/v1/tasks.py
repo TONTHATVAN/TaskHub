@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Query, Response, status
 
 from app.api.dependencies import (
     CurrentUserDep,
@@ -43,6 +43,7 @@ async def create_task(
     access: WritableProjectDep,
     service: TaskServiceDep,
     user: CurrentUserDep,
+    background_tasks: BackgroundTasks,
 ) -> Task:
     return await service.create(
         project_id=project_id,
@@ -53,6 +54,7 @@ async def create_task(
         created_by=user.id,
         assignee_id=payload.assignee_id,
         due_date=payload.due_date,
+        background_tasks=background_tasks,
     )
 
 
@@ -101,8 +103,13 @@ async def update_task(
     payload: TaskUpdate,
     task: WritableTaskDep,
     service: TaskServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> Task:
-    return await service.update(task, payload.to_changes())
+    return await service.update(
+        task,
+        payload.to_changes(),
+        background_tasks=background_tasks,
+    )
 
 
 @tasks_router.delete(

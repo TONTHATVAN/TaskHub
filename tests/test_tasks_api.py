@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
@@ -6,18 +7,35 @@ from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
     get_current_user,
+    get_email_service,
     get_task_authorization_service,
     get_task_cache_service,
     get_task_repository,
+    get_user_repository,
 )
 from app.domain.authorization import ProjectAccess
 from app.domain.exceptions import NotFoundError, ProjectNotFoundError, TaskNotFoundError
 from app.domain.project import Project, ProjectStatus
 from app.domain.task import Task
 from app.domain.user import User, UserRole
+from app.domain.user_repository import UserRepository
+from app.infrastructure.email import InMemoryEmailService
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
 from app.infrastructure.task_cache import InMemoryTaskCacheService
 from app.main import create_app
+
+
+class TestUserRepository:
+    async def get_by_id(self, user_id: UUID) -> User | None:
+        return User(
+            id=user_id,
+            email=f"user_{user_id}@example.com",
+            full_name="Assignee User",
+            hashed_password="disabled",
+            role=UserRole.MEMBER,
+            is_active=True,
+            created_at=datetime.now(UTC),
+        )
 
 
 def create_test_app() -> FastAPI:
@@ -26,6 +44,10 @@ def create_test_app() -> FastAPI:
     cache = InMemoryTaskCacheService()
     app.dependency_overrides[get_task_repository] = lambda: repository
     app.dependency_overrides[get_task_cache_service] = lambda: cache
+    app.dependency_overrides[get_email_service] = lambda: InMemoryEmailService()
+    app.dependency_overrides[get_user_repository] = lambda: cast(
+        UserRepository, TestUserRepository()
+    )
     app.dependency_overrides[get_current_user] = lambda: User(
         id=uuid4(),
         email="test@example.com",
