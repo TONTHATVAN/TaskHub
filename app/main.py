@@ -21,7 +21,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="TaskHub API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(
+        title="TaskHub API",
+        version="1.0.0",
+        description="TaskHub — Task Management API built with FastAPI, SQLAlchemy 2.x async, Alembic, Redis & Docker",
+        lifespan=lifespan,
+    )
     app.include_router(api_router)
 
     @app.exception_handler(AppException)
