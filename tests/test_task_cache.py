@@ -299,3 +299,115 @@ def test_api_tasks_caching_and_invalidation_flow() -> None:
         assert res6.status_code == 200
         assert res6.json() == []
         assert repository.list_calls == 4
+
+
+@pytest.mark.asyncio
+async def test_workspace_remove_member_invalidates_only_workspace_projects() -> None:
+    from app.application.workspace_service import WorkspaceService
+    from app.domain.workspace import Workspace, WorkspaceRole
+
+    workspace_id = uuid4()
+    owner_id = uuid4()
+    member_id = uuid4()
+
+    workspace = Workspace(workspace_id, "Target Workspace", owner_id, datetime.now(UTC))
+
+    class StubWorkspaceRepo:
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def add(self, name: str, owner_id: UUID) -> Workspace:
+            return workspace
+
+        async def get(self, ws_id: UUID) -> Workspace | None:
+            return workspace
+
+        async def rename(self, ws_id: UUID, name: str) -> Workspace | None:
+            return None
+
+        async def delete(self, ws_id: UUID) -> bool:
+            return False
+
+        async def get_member_role(
+            self, ws_id: UUID, user_id: UUID, *, for_update: bool = False
+        ) -> WorkspaceRole | None:
+            return None
+
+        async def list_members(self, ws_id: UUID, *, page: int = 1, limit: int = 20):
+            return [], 0
+
+        async def add_member(
+            self, ws_id: UUID, user_id: UUID, role: WorkspaceRole
+        ) -> bool:
+            return True
+
+        async def remove_member(self, ws_id: UUID, user_id: UUID) -> bool:
+            return True
+
+        async def commit(self) -> None:
+            self.committed = True
+
+    project_1 = Project(
+        uuid4(), workspace_id, "P1", None, ProjectStatus.ACTIVE, datetime.now(UTC)
+    )
+    project_2 = Project(
+        uuid4(), workspace_id, "P2", None, ProjectStatus.ACTIVE, datetime.now(UTC)
+    )
+
+    class StubProjectRepo:
+        async def list_by_workspace(
+            self, ws_id: UUID, *, page: int = 1, limit: int = 20
+        ) -> tuple[list[Project], int]:
+            if ws_id == workspace_id:
+                return [project_1, project_2], 2
+            return [], 0
+
+    class TrackingCache(InMemoryTaskCacheService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.invalidated_projects: list[UUID] = []
+            self.all_invalidated = False
+
+        async def invalidate_project(self, project_id: UUID) -> None:
+            self.invalidated_projects.append(project_id)
+            await super().invalidate_project(project_id)
+
+        async def invalidate_all(self) -> None:
+            self.all_invalidated = True
+            await super().invalidate_all()
+
+    class StubUserRepo:
+        async def get_by_id(self, user_id: UUID) -> User | None:
+            return None
+
+    repo = StubWorkspaceRepo()
+    proj_repo = StubProjectRepo()
+    cache = TrackingCache()
+    service = WorkspaceService(
+        repository=repo,  # type: ignore[arg-type]
+        users=StubUserRepo(),  # type: ignore[arg-type]
+        cache=cache,
+        projects=proj_repo,  # type: ignore[arg-type]
+    )
+
+    await service.remove_member(workspace, member_id)
+
+    assert repo.committed is True
+    assert cache.all_invalidated is False
+    assert set(cache.invalidated_projects) == {project_1.id, project_2.id}
+
+
+def test_redis_settings_and_client_have_timeout() -> None:
+    from app.infrastructure.redis import get_redis_client
+    from app.infrastructure.settings import settings
+
+    assert settings.redis_socket_timeout > 0
+    assert settings.redis_connect_timeout > 0
+
+    client = get_redis_client()
+    connection_kwargs = client.connection_pool.connection_kwargs
+    assert connection_kwargs.get("socket_timeout") == settings.redis_socket_timeout
+    assert (
+        connection_kwargs.get("socket_connect_timeout")
+        == settings.redis_connect_timeout
+    )

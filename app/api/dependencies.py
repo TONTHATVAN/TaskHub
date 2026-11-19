@@ -129,21 +129,22 @@ async def get_workspace_repository(
     return SqlWorkspaceRepository(session)
 
 
-def get_workspace_service(
-    repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
-    users: Annotated[UserRepository, Depends(get_user_repository)],
-    cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
-) -> WorkspaceService:
-    return WorkspaceService(repository, users, cache=cache)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
-
-
 async def get_project_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> ProjectRepository:
     return SqlProjectRepository(session)
+
+
+def get_workspace_service(
+    repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
+    projects: Annotated[ProjectRepository, Depends(get_project_repository)],
+) -> WorkspaceService:
+    return WorkspaceService(repository, users, cache=cache, projects=projects)
+
+
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 def get_project_service(

@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
     task_cache_ttl_seconds: int = Field(default=300, gt=0)
+    redis_socket_timeout: float = Field(default=1.0, gt=0)
+    redis_connect_timeout: float = Field(default=1.0, gt=0)
     jwt_secret_key: SecretStr = Field(min_length=JWT_SECRET_KEY_MIN_LENGTH)
     jwt_access_minutes: int = Field(default=15, gt=0)
     jwt_refresh_days: int = Field(default=7, gt=0)

@@ -12,6 +12,8 @@ def get_redis_client() -> Redis:
             settings.redis_url,
             encoding="utf-8",
             decode_responses=True,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_connect_timeout,
         )
     return _redis_client
 
