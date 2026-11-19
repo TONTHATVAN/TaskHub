@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.constants import LIMIT_MAX
 from app.domain.authorization import WorkspacePermission, WorkspacePolicy
 from app.domain.exceptions import (
     AccessDeniedError,
@@ -9,6 +10,8 @@ from app.domain.exceptions import (
     WorkspaceMemberNotFoundError,
     WorkspaceNotFoundError,
 )
+from app.domain.project_repository import ProjectRepository
+from app.domain.task_cache import TaskCacheService
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
 from app.domain.workspace import Workspace, WorkspaceMember, WorkspaceRole
@@ -16,9 +19,17 @@ from app.domain.workspace_repository import WorkspaceRepository
 
 
 class WorkspaceService:
-    def __init__(self, repository: WorkspaceRepository, users: UserRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkspaceRepository,
+        users: UserRepository,
+        cache: TaskCacheService | None = None,
+        projects: ProjectRepository | None = None,
+    ) -> None:
         self._repository = repository
         self._users = users
+        self._cache = cache
+        self._projects = projects
 
     async def create(self, user: User, name: str) -> Workspace:
         return await self._repository.add(name, user.id)
@@ -89,3 +100,15 @@ class WorkspaceService:
             if await self._repository.get(workspace.id) is None:
                 raise WorkspaceNotFoundError
             raise WorkspaceMemberNotFoundError
+        await self._repository.commit()
+        if self._cache is not None:
+            if self._projects is not None:
+                workspace_projects, _ = await self._projects.list_by_workspace(
+                    workspace.id,
+                    page=1,
+                    limit=LIMIT_MAX,
+                )
+                for project in workspace_projects:
+                    await self._cache.invalidate_project(project.id)
+            else:
+                await self._cache.invalidate_all()

@@ -23,12 +23,14 @@ from app.domain.project import Project
 from app.domain.project_repository import ProjectRepository
 from app.domain.refresh_token_repository import RefreshTokenRepository
 from app.domain.task import Task
+from app.domain.task_cache import TaskCacheService
 from app.domain.task_repository import TaskRepository
 from app.domain.user import User
 from app.domain.user_repository import UserRepository
 from app.domain.workspace import Workspace
 from app.domain.workspace_repository import WorkspaceRepository
 from app.infrastructure.database import get_session
+from app.infrastructure.redis import get_redis_client
 from app.infrastructure.repositories.authorization import SqlProjectAccessRepository
 from app.infrastructure.repositories.comment import SqlCommentRepository
 from app.infrastructure.repositories.label import SqlLabelRepository
@@ -38,6 +40,7 @@ from app.infrastructure.repositories.task import SqlTaskRepository
 from app.infrastructure.repositories.user import SqlUserRepository
 from app.infrastructure.repositories.workspace import SqlWorkspaceRepository
 from app.infrastructure.settings import settings
+from app.infrastructure.task_cache import RedisTaskCacheService
 
 
 async def get_task_repository(
@@ -46,10 +49,21 @@ async def get_task_repository(
     return SqlTaskRepository(session)
 
 
+def get_task_cache_service() -> TaskCacheService:
+    return RedisTaskCacheService(
+        get_redis_client(),
+        ttl_seconds=settings.task_cache_ttl_seconds,
+    )
+
+
+TaskCacheServiceDep = Annotated[TaskCacheService, Depends(get_task_cache_service)]
+
+
 def get_task_service(
     repository: Annotated[TaskRepository, Depends(get_task_repository)],
+    cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
 ) -> TaskService:
-    return TaskService(repository)
+    return TaskService(repository, cache=cache)
 
 
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
@@ -115,20 +129,22 @@ async def get_workspace_repository(
     return SqlWorkspaceRepository(session)
 
 
-def get_workspace_service(
-    repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
-    users: Annotated[UserRepository, Depends(get_user_repository)],
-) -> WorkspaceService:
-    return WorkspaceService(repository, users)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
-
-
 async def get_project_repository(
     session: Annotated[AsyncSession, Depends(get_session, scope="function")],
 ) -> ProjectRepository:
     return SqlProjectRepository(session)
+
+
+def get_workspace_service(
+    repository: Annotated[WorkspaceRepository, Depends(get_workspace_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    cache: Annotated[TaskCacheService, Depends(get_task_cache_service)],
+    projects: Annotated[ProjectRepository, Depends(get_project_repository)],
+) -> WorkspaceService:
+    return WorkspaceService(repository, users, cache=cache, projects=projects)
+
+
+WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 def get_project_service(

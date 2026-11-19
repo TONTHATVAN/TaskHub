@@ -12,6 +12,7 @@ from test_auth_api import MemoryUserRepository
 
 from app.api.dependencies import (
     get_current_user,
+    get_project_repository,
     get_user_repository,
     get_workspace_repository,
 )
@@ -104,6 +105,9 @@ class MemoryWorkspaceRepository:
         del self.members[workspace_id, user_id]
         return True
 
+    async def commit(self) -> None:
+        pass
+
 
 def test_removed_workspace_reports_workspace_not_found() -> None:
     class DeletedWorkspaceRepository(MemoryWorkspaceRepository):
@@ -175,6 +179,13 @@ def test_workspace_crud_validation_and_owner_permissions() -> None:
         assert client.delete(endpoint).status_code == 404
 
 
+class StubProjectRepo:
+    async def list_by_workspace(
+        self, workspace_id: UUID, *, page: int = 1, limit: int = 20
+    ) -> tuple[list[object], int]:
+        return [], 0
+
+
 def test_workspace_members_and_role_boundaries() -> None:
     owner, editor, viewer, outsider = (make_user() for _ in range(4))
     admin = make_user(UserRole.ADMIN)
@@ -188,6 +199,7 @@ def test_workspace_members_and_role_boundaries() -> None:
     app.dependency_overrides[get_current_user] = lambda: current[0]
     app.dependency_overrides[get_workspace_repository] = lambda: repository
     app.dependency_overrides[get_user_repository] = lambda: users
+    app.dependency_overrides[get_project_repository] = StubProjectRepo
 
     with TestClient(app) as client:
         created = client.post("/api/v1/workspaces", json={"name": "Team"})

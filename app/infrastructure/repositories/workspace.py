@@ -147,3 +147,6 @@ class SqlWorkspaceRepository:
             .values(assignee_id=None)
         )
         return True
+
+    async def commit(self) -> None:
+        await self._session.commit()

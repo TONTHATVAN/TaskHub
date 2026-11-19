@@ -8,6 +8,7 @@ from app.api.error_handling import app_error_response
 from app.api.router import api_router
 from app.core.exceptions import AppException
 from app.infrastructure.database import engine
+from app.infrastructure.redis import close_redis
 
 
 @asynccontextmanager
@@ -15,6 +16,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await close_redis()
         await engine.dispose()
 
 

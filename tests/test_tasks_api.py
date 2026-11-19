@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import (
     get_current_user,
     get_task_authorization_service,
+    get_task_cache_service,
     get_task_repository,
 )
 from app.domain.authorization import ProjectAccess
@@ -15,13 +16,16 @@ from app.domain.project import Project, ProjectStatus
 from app.domain.task import Task
 from app.domain.user import User, UserRole
 from app.infrastructure.in_memory_task_repository import InMemoryTaskRepository
+from app.infrastructure.task_cache import InMemoryTaskCacheService
 from app.main import create_app
 
 
 def create_test_app() -> FastAPI:
     app = create_app()
     repository = InMemoryTaskRepository()
+    cache = InMemoryTaskCacheService()
     app.dependency_overrides[get_task_repository] = lambda: repository
+    app.dependency_overrides[get_task_cache_service] = lambda: cache
     app.dependency_overrides[get_current_user] = lambda: User(
         id=uuid4(),
         email="test@example.com",
