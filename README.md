@@ -12,16 +12,12 @@ Trong PowerShell, tại thư mục project:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-if (-not (Test-Path .env)) {
-    $dbPassword = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(24))"
-    $jwtSecret = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
-    (Get-Content .env.example -Raw).Replace('POSTGRES_PASSWORD=', "POSTGRES_PASSWORD=$dbPassword").Replace('replace-with-a-local-password', $dbPassword).Replace('JWT_SECRET_KEY=', "JWT_SECRET_KEY=$jwtSecret") | Set-Content .env -Encoding utf8
-}
+.\.venv\Scripts\python.exe scripts/create_env.py
 docker compose up -d db redis
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Nếu đã có `.env`, hãy xác nhận `POSTGRES_PASSWORD`, mật khẩu trong `DATABASE_URL` và `JWT_SECRET_KEY` đã được đặt; file mẫu để trống hai secret. Không đưa `.env` vào Git.
+Script tạo mật khẩu và JWT secret ngẫu nhiên từ `.env.example`, kiểm tra các giá trị bắt buộc và giữ nguyên `.env` nếu file đã tồn tại. File mẫu để trống hai secret. Không đưa `.env` vào Git.
 
 PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang được sử dụng. Redis dùng `localhost:6379`. Kiểm tra bằng `docker compose ps`; dừng dịch vụ bằng `docker compose down`.
 
@@ -182,15 +178,8 @@ Buổi cuối cùng hoàn thiện toàn bộ hệ thống và đóng gói triể
 Sau khi tạo `.env`, một lệnh `docker compose up --build -d` sẽ khởi động toàn bộ hệ thống (FastAPI, PostgreSQL, Redis và Mailpit):
 
 ```powershell
-# 1. Tạo .env với mật khẩu DB và JWT secret ngẫu nhiên nếu chưa có
-if (-not (Test-Path .env)) {
-    $dbPassword = python -c "import secrets; print(secrets.token_hex(24))"
-    $jwtSecret = python -c "import secrets; print(secrets.token_urlsafe(32))"
-    (Get-Content .env.example -Raw).Replace('POSTGRES_PASSWORD=', "POSTGRES_PASSWORD=$dbPassword").Replace('replace-with-a-local-password', $dbPassword).Replace('JWT_SECRET_KEY=', "JWT_SECRET_KEY=$jwtSecret") | Set-Content .env -Encoding utf8
-}
-
-# Nếu đã có .env, kiểm tra POSTGRES_PASSWORD và JWT_SECRET_KEY đã được đặt.
-# DATABASE_URL trong .env dùng cho chạy ứng dụng trực tiếp trên máy và phải dùng cùng mật khẩu DB.
+# 1. Tạo .env nếu chưa có, hoặc kiểm tra .env hiện tại
+python scripts/create_env.py
 
 # 2. Khởi chạy toàn bộ hệ thống trong nền
 docker compose up --build -d

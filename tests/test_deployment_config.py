@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 
 def test_dockerfile_multi_stage_structure() -> None:
