@@ -3,21 +3,21 @@ TaskHub — Hệ thống quản lý công việc (Task Management API)
 
 ## Môi trường phát triển
 
-- Python 3.12; các thư viện Python được ghi trong [`requirements.txt`](requirements.txt).
-- PostgreSQL 16 và Redis 7 chạy bằng [`compose.yaml`](compose.yaml). Bản Compose hiện chuẩn bị DB và Redis; ứng dụng chạy trực tiếp trên máy phát triển.
+- Python 3.12; thư viện chạy ứng dụng nằm trong [`requirements.txt`](requirements.txt), công cụ phát triển và kiểm thử nằm trong [`requirements-dev.txt`](requirements-dev.txt).
+- [`compose.yaml`](compose.yaml) chạy ứng dụng, PostgreSQL, Redis và Mailpit.
 - Cấu hình mẫu nằm trong [`.env.example`](.env.example). File `.env` cục bộ chứa mật khẩu DB và không được đưa lên Git.
 
 Trong PowerShell, tại thư mục project:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe scripts/create_env.py
 docker compose up -d db redis
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Nếu tạo `.env` từ file mẫu, hãy thay `POSTGRES_PASSWORD`, mật khẩu tương ứng trong `DATABASE_URL` và `JWT_SECRET_KEY` bằng một chuỗi ngẫu nhiên tối thiểu 32 ký tự trước khi khởi động ứng dụng.
+Script tạo mật khẩu và JWT secret ngẫu nhiên từ `.env.example`, kiểm tra các giá trị bắt buộc và giữ nguyên `.env` nếu file đã tồn tại. File mẫu để trống hai secret. Không đưa `.env` vào Git.
 
 PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang được sử dụng. Redis dùng `localhost:6379`. Kiểm tra bằng `docker compose ps`; dừng dịch vụ bằng `docker compose down`.
 
@@ -158,3 +158,148 @@ Khi có bất kỳ thay đổi nào tác động đến dữ liệu Task trong P
 ## Buổi 7 — Background Task thông báo email khi giao Task
 
 Khi tạo Task có người thực hiện (`assignee_id`) hoặc khi cập nhật thay đổi người thực hiện sang thành viên khác, hệ thống kích hoạt một tác vụ chạy nền (`fastapi.BackgroundTasks`) để gửi email thông báo cho thành viên được giao việc qua SMTP (`aiosmtplib`). Thao tác gửi email chạy ngầm sau khi phản hồi HTTP đã được gửi về client, giúp API phản hồi tức thì mà không bị trễ bởi kết nối mạng tới máy chủ mail.
+
+## Buổi 8 — Docker Compose, Refactor & Hoàn thiện dự án
+
+Buổi cuối cùng hoàn thiện toàn bộ hệ thống và đóng gói triển khai:
+- **Dockerfile multi-stage build**: Tách biệt rõ 2 giai đoạn: `builder` biên dịch các thư viện Python trong virtual environment và `runner` tối giản chạy trên nền `python:3.12-slim`, chạy dưới tài khoản non-root (`taskhub`) để đảm bảo an toàn bảo mật.
+- **Tự động áp dụng Migration khi khởi động**: Container app tự động chạy `alembic upgrade head` trước khi khởi động Uvicorn server, đảm bảo database luôn ở phiên bản schema mới nhất.
+- **Docker Compose hoàn chỉnh (`compose.yaml`)**: Quản lý đồng bộ 4 service:
+  1. `db`: PostgreSQL 16 có volume lưu trữ và healthcheck `pg_isready`.
+  2. `redis`: Redis 7 có volume lưu trữ và healthcheck `redis-cli ping`.
+  3. `mailpit`: Máy chủ SMTP giả lập nội bộ (cổng 1025) kèm giao diện web trực quan (cổng 8025) để xem email gửi nền.
+  4. `app`: FastAPI backend, phụ thuộc vào `db` và `redis` ở trạng thái healthy, kết nối nội bộ qua mạng docker và tự kiểm tra sức khỏe tại endpoint `/health`.
+- **Rà soát chất lượng mã nguồn toàn diện**: Ruff format và lint pass 100%, Mypy 0 error trên toàn bộ 90+ files mã nguồn, loại bỏ mã trùng lặp, tối ưu hóa các luồng xử lý và đảm bảo nguyên tắc DRY.
+
+---
+
+## Hướng dẫn triển khai với Docker Compose
+
+Sau khi tạo `.env`, một lệnh `docker compose up --build -d` sẽ khởi động toàn bộ hệ thống (FastAPI, PostgreSQL, Redis và Mailpit):
+
+```powershell
+# 1. Tạo .env nếu chưa có, hoặc kiểm tra .env hiện tại
+python scripts/create_env.py
+
+# 2. Khởi chạy toàn bộ hệ thống trong nền
+docker compose up --build -d
+# 3. Theo dõi log khởi động và migration của app
+docker compose logs -f app
+
+# 4. Kiểm tra trạng thái các container
+docker compose ps
+```
+
+Sau khi các container ở trạng thái `healthy` hoặc `running`:
+- **API Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Hộp thư Mailpit (xem email thông báo)**: [http://localhost:8025](http://localhost:8025)
+
+Dừng hệ thống:
+```powershell
+docker compose down
+```
+
+Dừng và xóa toàn bộ dữ liệu volumes (chỉ khi muốn tạo lại database và Redis từ đầu):
+```powershell
+docker compose down -v
+```
+
+---
+
+## Bảng cấu hình biến môi trường (`.env`)
+
+| Tên biến | Kiểu / Giá trị mặc định | Mô tả |
+|---|---|---|
+| `POSTGRES_USER` | `taskhub` | Tên người dùng cơ sở dữ liệu PostgreSQL |
+| `POSTGRES_PASSWORD` | *(Bắt buộc thay đổi)* | Mật khẩu cơ sở dữ liệu PostgreSQL |
+| `POSTGRES_DB` | `taskhub` | Tên database TaskHub |
+| `DATABASE_URL` | `postgresql+asyncpg://...` | Connection string async SQLAlchemy cho PostgreSQL |
+| `REDIS_URL` | `redis://localhost:6379/0` | URL kết nối Redis cache |
+| `TASK_CACHE_TTL_SECONDS` | `300` | Thời gian sống (TTL) của cache danh sách Task (giây) |
+| `REDIS_SOCKET_TIMEOUT` | `1.0` | Timeout đọc/ghi socket Redis (giây) |
+| `REDIS_CONNECT_TIMEOUT` | `1.0` | Timeout kết nối ban đầu tới Redis (giây) |
+| `JWT_SECRET_KEY` | *(Tối thiểu 32 ký tự)* | Khóa bí mật dùng để ký và giải mã JWT token |
+| `JWT_ACCESS_MINUTES` | `15` | Thời gian hiệu lực của Access Token (phút) |
+| `JWT_REFRESH_DAYS` | `7` | Thời gian hiệu lực của Refresh Token (ngày) |
+| `SMTP_HOST` | `localhost` / `mailpit` | Địa chỉ máy chủ SMTP gửi mail |
+| `SMTP_PORT` | `1025` | Cổng dịch vụ SMTP |
+| `SMTP_FROM` | `noreply@taskhub.com` | Địa chỉ email người gửi |
+| `EMAIL_NOTIFICATIONS_ENABLED`| `true` | Bật/tắt tính năng gửi email chạy nền |
+
+---
+
+## Tổng hợp danh mục API Endpoints
+
+### 1. Xác thực & Tài khoản (`/api/v1/auth`)
+- `POST /api/v1/auth/register`: Đăng ký tài khoản mới (mật khẩu băm bcrypt).
+- `POST /api/v1/auth/login`: Đăng nhập, nhận access token và refresh token.
+- `POST /api/v1/auth/refresh`: Đổi refresh token còn hạn lấy cặp token mới.
+- `POST /api/v1/auth/logout`: Thu hồi refresh token hiện tại.
+
+### 2. Hồ sơ người dùng (`/api/v1/users`)
+- `GET /api/v1/users/me`: Xem thông tin hồ sơ của tài khoản đang đăng nhập.
+- `PATCH /api/v1/users/me`: Cập nhật email và họ tên.
+- `POST /api/v1/users/me/change-password`: Đổi mật khẩu tài khoản.
+
+### 3. Workspace (`/api/v1/workspaces`)
+- `POST /api/v1/workspaces`: Tạo Workspace mới (người tạo tự động là OWNER).
+- `GET /api/v1/workspaces/{workspace_id}`: Xem chi tiết Workspace.
+- `PATCH /api/v1/workspaces/{workspace_id}`: Đổi tên Workspace (chỉ OWNER/ADMIN).
+- `DELETE /api/v1/workspaces/{workspace_id}`: Xóa Workspace (cascade xóa toàn bộ dữ liệu con).
+- `GET /api/v1/workspaces/{workspace_id}/members`: Liệt kê thành viên (có phân trang).
+- `POST /api/v1/workspaces/{workspace_id}/members`: Mời/thêm thành viên với role EDITOR/VIEWER.
+- `DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}`: Xóa thành viên khỏi Workspace.
+
+### 4. Project (`/api/v1/workspaces/{id}/projects` & `/api/v1/projects`)
+- `POST /api/v1/workspaces/{workspace_id}/projects`: Tạo Project trong Workspace.
+- `GET /api/v1/workspaces/{workspace_id}/projects`: Liệt kê Project (phân trang).
+- `GET /api/v1/projects/{project_id}`: Xem chi tiết Project.
+- `PATCH /api/v1/projects/{project_id}`: Cập nhật tên/mô tả Project.
+- `DELETE /api/v1/projects/{project_id}`: Xóa Project.
+- `POST /api/v1/projects/{project_id}/archive`: Lưu trữ Project (chặn ghi, cho phép đọc).
+- `POST /api/v1/projects/{project_id}/unarchive`: Mở lại Project đã lưu trữ.
+
+### 5. Task & Caching (`/api/v1/projects/{id}/tasks` & `/api/v1/tasks`)
+- `GET /api/v1/projects/{project_id}/tasks`: Lấy danh sách Task (hỗ trợ lọc theo `status`, `priority`, `assignee_id`, phân trang `page`/`limit`, cache bằng Redis 300s).
+- `POST /api/v1/projects/{project_id}/tasks`: Tạo Task mới trong Project (xóa cache liên quan, gửi email nếu có giao việc).
+- `GET /api/v1/tasks/{task_id}`: Xem chi tiết Task.
+- `PATCH /api/v1/tasks/{task_id}`: Cập nhật Task (status, priority, due date, assignee; xóa cache liên quan, gửi email nếu thay đổi người nhận).
+- `DELETE /api/v1/tasks/{task_id}`: Xóa Task (xóa cache liên quan).
+
+### 6. Nhãn dán — Label (`/api/v1/projects/{id}/labels` & `/api/v1/tasks/{id}/labels`)
+- `POST /api/v1/projects/{project_id}/labels`: Tạo nhãn trong Project.
+- `GET /api/v1/projects/{project_id}/labels`: Xem danh sách nhãn.
+- `PATCH /api/v1/projects/{project_id}/labels/{label_id}`: Sửa tên/màu nhãn.
+- `DELETE /api/v1/projects/{project_id}/labels/{label_id}`: Xóa nhãn.
+- `GET /api/v1/tasks/{task_id}/labels`: Xem các nhãn gắn trên Task.
+- `POST /api/v1/tasks/{task_id}/labels/{label_id}`: Gắn nhãn vào Task.
+- `DELETE /api/v1/tasks/{task_id}/labels/{label_id}`: Gỡ nhãn khỏi Task.
+
+### 7. Bình luận — Comment (`/api/v1/tasks/{id}/comments`)
+- `POST /api/v1/tasks/{task_id}/comments`: Thêm bình luận vào Task.
+- `GET /api/v1/tasks/{task_id}/comments`: Xem bình luận trên Task (có phân trang).
+- `DELETE /api/v1/tasks/{task_id}/comments/{comment_id}`: Xóa bình luận.
+
+### 8. Giám sát hệ thống
+- `GET /health`: Kiểm tra trạng thái hoạt động (dùng cho Docker healthcheck và load balancer).
+
+---
+
+## Kiểm tra chất lượng mã nguồn
+
+Chạy các lệnh sau tại thư mục gốc của project để kiểm tra toàn bộ tiêu chuẩn mã nguồn:
+
+```powershell
+# 1. Kiểm tra và định dạng code theo chuẩn Ruff
+.\.venv\Scripts\ruff.exe format --check app tests migrations
+.\.venv\Scripts\ruff.exe check app tests migrations
+
+# 2. Kiểm tra kiểu tĩnh (Static Type Checking) với Mypy
+.\.venv\Scripts\mypy.exe app tests migrations
+
+# 3. Chạy toàn bộ bộ test suite
+$env:PYTHONPATH = "."
+.\.venv\Scripts\python.exe -m pytest -v
+```
