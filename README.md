@@ -3,21 +3,25 @@ TaskHub — Hệ thống quản lý công việc (Task Management API)
 
 ## Môi trường phát triển
 
-- Python 3.12; các thư viện Python được ghi trong [`requirements.txt`](requirements.txt).
-- PostgreSQL 16 và Redis 7 chạy bằng [`compose.yaml`](compose.yaml). Bản Compose hiện chuẩn bị DB và Redis; ứng dụng chạy trực tiếp trên máy phát triển.
+- Python 3.12; thư viện chạy ứng dụng nằm trong [`requirements.txt`](requirements.txt), công cụ phát triển và kiểm thử nằm trong [`requirements-dev.txt`](requirements-dev.txt).
+- [`compose.yaml`](compose.yaml) chạy ứng dụng, PostgreSQL, Redis và Mailpit.
 - Cấu hình mẫu nằm trong [`.env.example`](.env.example). File `.env` cục bộ chứa mật khẩu DB và không được đưa lên Git.
 
 Trong PowerShell, tại thư mục project:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+if (-not (Test-Path .env)) {
+    $dbPassword = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(24))"
+    $jwtSecret = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+    (Get-Content .env.example -Raw).Replace('POSTGRES_PASSWORD=', "POSTGRES_PASSWORD=$dbPassword").Replace('replace-with-a-local-password', $dbPassword).Replace('JWT_SECRET_KEY=', "JWT_SECRET_KEY=$jwtSecret") | Set-Content .env -Encoding utf8
+}
 docker compose up -d db redis
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-Nếu tạo `.env` từ file mẫu, hãy thay `POSTGRES_PASSWORD`, mật khẩu tương ứng trong `DATABASE_URL` và `JWT_SECRET_KEY` bằng một chuỗi ngẫu nhiên tối thiểu 32 ký tự trước khi khởi động ứng dụng.
+Nếu đã có `.env`, hãy xác nhận `POSTGRES_PASSWORD`, mật khẩu trong `DATABASE_URL` và `JWT_SECRET_KEY` đã được đặt; file mẫu để trống hai secret. Không đưa `.env` vào Git.
 
 PostgreSQL dùng cổng `localhost:5433` vì cổng `5432` trên máy đang được sử dụng. Redis dùng `localhost:6379`. Kiểm tra bằng `docker compose ps`; dừng dịch vụ bằng `docker compose down`.
 
@@ -175,17 +179,21 @@ Buổi cuối cùng hoàn thiện toàn bộ hệ thống và đóng gói triể
 
 ## Hướng dẫn triển khai với Docker Compose
 
-Chỉ cần một lệnh duy nhất để khởi động toàn bộ stack hệ thống (FastAPI App, PostgreSQL, Redis và Mailpit):
+Sau khi tạo `.env`, một lệnh `docker compose up --build -d` sẽ khởi động toàn bộ hệ thống (FastAPI, PostgreSQL, Redis và Mailpit):
 
 ```powershell
-# 1. Chuẩn bị file .env nếu chưa có
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+# 1. Tạo .env với mật khẩu DB và JWT secret ngẫu nhiên nếu chưa có
+if (-not (Test-Path .env)) {
+    $dbPassword = python -c "import secrets; print(secrets.token_hex(24))"
+    $jwtSecret = python -c "import secrets; print(secrets.token_urlsafe(32))"
+    (Get-Content .env.example -Raw).Replace('POSTGRES_PASSWORD=', "POSTGRES_PASSWORD=$dbPassword").Replace('replace-with-a-local-password', $dbPassword).Replace('JWT_SECRET_KEY=', "JWT_SECRET_KEY=$jwtSecret") | Set-Content .env -Encoding utf8
+}
+
+# Nếu đã có .env, kiểm tra POSTGRES_PASSWORD và JWT_SECRET_KEY đã được đặt.
+# DATABASE_URL trong .env dùng cho chạy ứng dụng trực tiếp trên máy và phải dùng cùng mật khẩu DB.
 
 # 2. Khởi chạy toàn bộ hệ thống trong nền
 docker compose up --build -d
-# hoặc trên máy dùng docker-compose v1/v2:
-docker-compose up --build -d
-
 # 3. Theo dõi log khởi động và migration của app
 docker compose logs -f app
 
@@ -204,7 +212,7 @@ Dừng hệ thống:
 docker compose down
 ```
 
-Dừng và xóa toàn bộ dữ liệu volumes:
+Dừng và xóa toàn bộ dữ liệu volumes (chỉ khi muốn tạo lại database và Redis từ đầu):
 ```powershell
 docker compose down -v
 ```

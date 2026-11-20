@@ -5,7 +5,7 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-taskhub}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-taskhub}
     ports:
       - "127.0.0.1:5433:5432"
@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.34.0
     ports:
       - "127.0.0.1:1025:1025"
       - "127.0.0.1:8025:8025"
@@ -43,12 +43,12 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-taskhub}:${POSTGRES_PASSWORD:-taskhub}@db:5432/${POSTGRES_DB:-taskhub}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-taskhub}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-taskhub}
       REDIS_URL: redis://redis:6379/0
       TASK_CACHE_TTL_SECONDS: ${TASK_CACHE_TTL_SECONDS:-300}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-taskhub-default-jwt-secret-key-32-chars-min}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       JWT_ACCESS_MINUTES: ${JWT_ACCESS_MINUTES:-15}
       JWT_REFRESH_DAYS: ${JWT_REFRESH_DAYS:-7}
       SMTP_HOST: mailpit
